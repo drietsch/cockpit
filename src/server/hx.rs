@@ -72,6 +72,21 @@ impl IntoResponse for Page {
     }
 }
 
+fn shell_ctx(app: &AppState) -> minijinja::Value {
+    let st = app.state.load();
+    minijinja::context! {
+        project => minijinja::Value::from_serialize(&st.project),
+        headline => st.headline.clone(),
+        overall => st.overall.as_str(),
+        counts => minijinja::Value::from_serialize(&st.counts),
+        attention_count => st.attention.len(),
+        warnings_count => st.warnings.len(),
+        generation => st.generation,
+        last_scan_at => st.last_scan_at.map(|t| t.to_string()),
+        multi_repo => app.multi_repo,
+    }
+}
+
 /// Render a page template with the standard context; `partial` decides whether chrome is
 /// included.
 pub fn render(
@@ -82,24 +97,12 @@ pub fn render(
     nav: &str,
     ctx: minijinja::Value,
 ) -> Result<Page, AppError> {
-    let st = app.state.load();
-    let shell = minijinja::context! {
-        project => minijinja::Value::from_serialize(&st.project),
-        headline => st.headline.clone(),
-        overall => st.overall.as_str(),
-        counts => minijinja::Value::from_serialize(&st.counts),
-        attention_count => st.attention.len(),
-        warnings_count => st.warnings.len(),
-        generation => st.generation,
-        last_scan_at => st.last_scan_at.map(|t| t.to_string()),
-        multi_repo => app.multi_repo,
-    };
     let full = minijinja::context! {
         partial => hx.partial(),
         theme => hx.theme.clone(),
         page_title => title,
         nav => nav,
-        shell => shell,
+        shell => shell_ctx(app),
         dev => app.dev,
         version => crate::VERSION,
         ..ctx
@@ -114,7 +117,10 @@ pub fn fragment(
     ctx: minijinja::Value,
     push_url: Option<String>,
 ) -> Result<Page, AppError> {
-    let html = app.templates.render(template, minijinja::context! { partial => true, ..ctx })?;
+    let html = app.templates.render(
+        template,
+        minijinja::context! { partial => true, shell => shell_ctx(app), ..ctx },
+    )?;
     Ok(Page { html, push_url, status: StatusCode::OK })
 }
 

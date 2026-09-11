@@ -196,3 +196,25 @@ pub fn serve_blocking(c: &mut Cockpit, opts: ServeOptions) -> anyhow::Result<()>
 async fn shutdown() {
     let _ = tokio::signal::ctrl_c().await;
 }
+
+impl AppState {
+    /// An app state without a scan worker, for tests and embedding.
+    pub fn standalone(cockpit: &Cockpit) -> anyhow::Result<AppState> {
+        let (events, _) = broadcast::channel::<LiveEvent>(16);
+        let (scan_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
+        let templates = Arc::new(templates::Templates::new(None)?);
+        Ok(AppState {
+            state: cockpit.state.clone(),
+            templates,
+            dev: false,
+            ui_dir: None,
+            events,
+            seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            project_root: cockpit.located.root.clone(),
+            evidence_dir: cockpit.located.evidence_dir(),
+            scan_requests: scan_tx,
+            multi_repo: cockpit.located.config.repos.len() > 1
+                || !cockpit.located.root.join(".git").exists(),
+        })
+    }
+}
