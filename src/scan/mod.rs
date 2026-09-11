@@ -8,7 +8,7 @@ pub mod watch;
 use crate::config::{Located, RepoSpec};
 use crate::git::{GitBackend, GitError};
 use crate::hash::ContentHash;
-use crate::ids::{CommitKey, RepoId, Sha};
+use crate::ids::{CommitKey, RepoId, Sha, SourceId};
 use crate::import::{
     ImportContext, ImportInput, ImportedEntity, Importer, ImporterKind, RepoIndex,
 };
@@ -204,6 +204,9 @@ impl<'a> Scanner<'a> {
                 source: None,
                 source_id: None,
                 now,
+                cargo: &Default::default(),
+                sidecars: &Default::default(),
+                commits: &Default::default(),
             };
             let imp = crate::import::feature_md::FeatureMdImporter;
             for abs in &feature_files {
@@ -235,6 +238,9 @@ impl<'a> Scanner<'a> {
                 source: None,
                 source_id: None,
                 now,
+                cargo: &Default::default(),
+                sidecars: &Default::default(),
+                commits: &Default::default(),
             };
             let imp = crate::import::adr_md::AdrMdImporter;
             for abs in walk::adr_files(self.located) {
@@ -254,17 +260,97 @@ impl<'a> Scanner<'a> {
             counts.adrs = store.count("adrs")? as usize;
             self.emit(ScanProgress::Counts(counts.clone()));
         }
+        store.batch_commit()?;
 
-        // 3. Files that vanished since the last scan.
+        // 3. Evidence: every configured (or conventional) source, with provenance context.
+        self.emit(ScanProgress::Phase("evidence"));
+        let manifests = walk::manifests(self.located);
+        let cargo = crate::import::cargo_index::CargoWorkspaceIndex::build(
+            &self.located.root,
+            &manifests
+                .iter()
+                .filter(|m| m.file_name() == "Cargo.toml")
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
+        let sidecars = crate::import::provenance::SidecarIndex::load(&self.located.evidence_dir());
+        let mut locator = crate::import::provenance::CommitLocator::default();
+        for (repo_id, sha, _parents, at) in store.commit_graph_rows()? {
+            locator.insert(repo_id, sha, at);
+        }
+        for r in &repos {
+            if let Some(h) = &r.head {
+                let at = locator_time(store, &r.id, &h.sha).unwrap_or(now);
+                locator.set_head(r.id.clone(), h.sha.clone(), at);
+            }
+        }
+        locator.finish();
+        store.batch_begin()?;
+        let sources = self.located.evidence_sources();
+        for (i, src) in sources.iter().enumerate() {
+            if !src.enabled {
+                continue;
+            }
+            let source_id = SourceId::new(
+                src.id.clone().unwrap_or_else(|| format!("auto:{}:{i}", src.format.as_str())),
+            );
+            let ctx = ImportContext {
+                located: self.located,
+                project: &project,
+                repos: &repo_index,
+                feature_ids: &feature_ids,
+                source: Some(src),
+                source_id: Some(source_id.clone()),
+                now,
+                cargo: &cargo,
+                sidecars: &sidecars,
+                commits: &locator,
+            };
+            let mut files: Vec<std::path::PathBuf> = Vec::new();
+            for pat in src.paths() {
+                let pat = pat.trim_start_matches("./").to_string();
+                if pat.starts_with('/') && src.allow_outside_root {
+                    files.extend(glob_abs(&pat));
+                } else {
+                    files.extend(glob_files(&self.located.root, &pat));
+                }
+            }
+            files.sort();
+            files.dedup();
+            for abs in &files {
+                if let Some(w) = self.import_evidence(
+                    store,
+                    &ctx,
+                    src,
+                    &source_id,
+                    abs,
+                    &known,
+                    &mut seen,
+                    &mut counts,
+                    now,
+                )? {
+                    warnings.extend(w);
+                }
+            }
+        }
+        store.batch_commit()?;
+        counts.tests = store.count("tests")? as usize;
+        counts.runs = store.count("runs")? as usize;
+        counts.benchmarks = store.count("benchmarks")? as usize;
+        self.emit(ScanProgress::Counts(counts.clone()));
+
+        // 4. Files that vanished since the last scan (documents are removed; evidence history stays).
         for (path, info) in &known {
-            if !seen.contains(path) && (info.importer == "feature-md" || info.importer == "adr-md")
-            {
-                store.delete_by_source_path(path)?;
+            if !seen.contains(path) {
+                if info.importer == "feature-md" || info.importer == "adr-md" {
+                    store.delete_by_source_path(path)?;
+                } else {
+                    store.forget_scan_file(path)?;
+                }
             }
         }
         counts.features = store.count("features")? as usize;
         counts.adrs = store.count("adrs")? as usize;
-        store.batch_commit()?;
 
         // Carry warnings of unchanged files too, so the banner is complete.
         let all_warnings = store.warnings()?;
@@ -367,6 +453,139 @@ impl<'a> Scanner<'a> {
                 importer: importer.kind().as_str(),
                 importer_version: importer.version(),
                 source_id: None,
+                status: status.into(),
+                warnings: out.warnings.clone(),
+            },
+            now,
+        )?;
+        store.replace_warnings(&rel, &out.warnings, now)?;
+        Ok(Some(out.warnings))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn import_evidence(
+        &self,
+        store: &mut Store,
+        ctx: &ImportContext,
+        src: &crate::config::EvidenceSource,
+        source_id: &SourceId,
+        abs: &Path,
+        known: &std::collections::HashMap<RelPath, crate::store::read::ScanFileInfo>,
+        seen: &mut HashSet<RelPath>,
+        counts: &mut ScanCounts,
+        now: Timestamp,
+    ) -> Result<Option<Vec<ImportWarning>>> {
+        let rel = relativize(&self.located.root, abs)
+            .unwrap_or_else(|| RelPath::new(format!("external/{}", abs.display())));
+        counts.files_seen += 1;
+        seen.insert(rel.clone());
+        let meta = std::fs::metadata(abs)?;
+        if meta.len() > self.located.config.scan.max_file_size_bytes() {
+            return Ok(None);
+        }
+        let mtime = meta.modified().ok().and_then(|t| Timestamp::try_from(t).ok()).unwrap_or(now);
+        let size = meta.len();
+        // Decide the importer: configured format, or sniffed.
+        let format = if src.format == crate::config::EvidenceFormat::Auto {
+            let bytes = std::fs::read(abs)?;
+            match crate::import::sniff::sniff(&bytes, rel.as_str()) {
+                Some(f) => f,
+                None => return Ok(None),
+            }
+        } else {
+            src.format
+        };
+        let Some(importer) = crate::import::importer_for(ImporterKind::Evidence(format)) else {
+            return Ok(None);
+        };
+        let importer_name = importer.kind().as_str();
+        if let Some(prev) = known.get(&rel) {
+            if prev.importer == importer_name
+                && prev.importer_version == importer.version()
+                && prev.size == size
+                && millis(prev.mtime) == millis(mtime)
+            {
+                return Ok(None);
+            }
+        }
+        let bytes = std::fs::read(abs)?;
+        let content_hash = ContentHash::of(&bytes);
+        if let Some(prev) = known.get(&rel) {
+            if prev.content_hash == content_hash.hex()
+                && prev.importer_version == importer.version()
+                && prev.importer == importer_name
+            {
+                store.upsert_scan_file(
+                    &ScanFileRecord {
+                        path: rel.clone(),
+                        mtime,
+                        size,
+                        content_hash,
+                        importer: importer_name,
+                        importer_version: importer.version(),
+                        source_id: Some(source_id.0.clone()),
+                        status: "ok".into(),
+                        warnings: vec![],
+                    },
+                    now,
+                )?;
+                return Ok(None);
+            }
+        }
+        let input = ImportInput {
+            abs: abs.to_path_buf(),
+            rel: rel.clone(),
+            bytes,
+            content_hash,
+            mtime,
+            size,
+        };
+        let out = importer.import(ctx, &input);
+        counts.files_imported += 1;
+        for entity in &out.entities {
+            match entity {
+                ImportedEntity::TestBatch(b) => {
+                    let identity = b
+                        .run
+                        .provenance
+                        .run_id
+                        .clone()
+                        .map(|r| format!("run:{r}"))
+                        .unwrap_or_else(|| content_hash.hex());
+                    let new = store.persist_test_batch(b, &identity, now)?;
+                    if new {
+                        counts.runs += 1;
+                    }
+                }
+                ImportedEntity::BenchmarkBatch(b) => {
+                    let identity = b
+                        .run
+                        .provenance
+                        .run_id
+                        .clone()
+                        .map(|r| format!("run:{r}"))
+                        .unwrap_or_else(|| content_hash.hex());
+                    store.persist_benchmark_batch(b, &identity, now)?;
+                }
+                _ => {}
+            }
+        }
+        let status = if out.warnings.iter().any(|w| w.fatal) {
+            "error"
+        } else if out.warnings.is_empty() {
+            "ok"
+        } else {
+            "warning"
+        };
+        store.upsert_scan_file(
+            &ScanFileRecord {
+                path: rel.clone(),
+                mtime,
+                size,
+                content_hash,
+                importer: importer_name,
+                importer_version: importer.version(),
+                source_id: Some(source_id.0.clone()),
                 status: status.into(),
                 warnings: out.warnings.clone(),
             },
@@ -591,8 +810,25 @@ pub use walk::{adr_files, feature_files};
 #[allow(dead_code)]
 fn _kinds(_k: ImporterKind) {}
 
+/// Directories that are never worth descending into for a `**` pattern unless the pattern
+/// itself names them (`target/nextest/...` does; `**/junit.xml` does not).
+const HEAVY_DIRS: &[&str] = &[
+    "target",
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".cache",
+    "vendor",
+    ".next",
+    ".turbo",
+    "out",
+    ".wrangler",
+];
+
 /// Files matching one glob below the root (used by doctor / evidence discovery). Walks only
-/// the literal prefix of the glob so `target/**` is not traversed beyond what is needed.
+/// the literal prefix of the glob, and prunes heavy build/dependency directories the pattern
+/// does not mention.
 pub fn glob_files(root: &Path, pattern: &str) -> Vec<std::path::PathBuf> {
     let Ok(glob) = globset::Glob::new(pattern) else { return vec![] };
     let matcher = glob.compile_matcher();
@@ -610,12 +846,27 @@ pub fn glob_files(root: &Path, pattern: &str) -> Vec<std::path::PathBuf> {
     if !start.exists() {
         return vec![];
     }
+    let mentioned: Vec<&str> =
+        HEAVY_DIRS.iter().copied().filter(|d| pattern.contains(&format!("{d}/"))).collect();
+    let start_rel = relativize(root, &start).unwrap_or_else(RelPath::root);
     let mut out = Vec::new();
     let mut builder = ignore::WalkBuilder::new(&start);
     builder.standard_filters(false).hidden(false).follow_links(false).max_depth(Some(12));
-    builder.filter_entry(|e| {
+    builder.filter_entry(move |e| {
+        if e.depth() == 0 {
+            return true;
+        }
         let n = e.file_name().to_string_lossy();
-        n != ".git" && n != "node_modules"
+        if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            if HEAVY_DIRS.contains(&n.as_ref()) && !mentioned.contains(&n.as_ref()) {
+                return false;
+            }
+            if n.starts_with(".local-") || n == ".cockpit" && !pattern_mentions_cockpit(&start_rel)
+            {
+                return false;
+            }
+        }
+        true
     });
     for entry in builder.build().flatten() {
         let p = entry.path();
@@ -626,6 +877,41 @@ pub fn glob_files(root: &Path, pattern: &str) -> Vec<std::path::PathBuf> {
             if matcher.is_match(rel.as_str()) {
                 out.push(p.to_path_buf());
             }
+        }
+    }
+    out.sort();
+    out
+}
+
+fn pattern_mentions_cockpit(start_rel: &RelPath) -> bool {
+    start_rel.components().any(|c| c == ".cockpit")
+}
+
+fn locator_time(store: &Store, repo: &RepoId, sha: &Sha) -> Option<Timestamp> {
+    store
+        .commits(repo, 1)
+        .ok()
+        .and_then(|v| v.into_iter().next())
+        .filter(|c| &c.key.sha == sha)
+        .map(|c| c.committed_at)
+}
+
+/// Absolute-path globs for sources that explicitly allow evidence outside the project root.
+pub fn glob_abs(pattern: &str) -> Vec<std::path::PathBuf> {
+    let Ok(glob) = globset::Glob::new(pattern) else { return vec![] };
+    let matcher = glob.compile_matcher();
+    let prefix: String = pattern.split(['*', '?', '[']).next().unwrap_or("").to_string();
+    let start = std::path::PathBuf::from(prefix.rsplit_once('/').map(|(d, _)| d).unwrap_or("/"));
+    if !start.exists() {
+        return vec![];
+    }
+    let mut out = Vec::new();
+    let mut builder = ignore::WalkBuilder::new(&start);
+    builder.standard_filters(false).hidden(false).follow_links(false).max_depth(Some(8));
+    for entry in builder.build().flatten() {
+        let p = entry.path();
+        if p.is_file() && matcher.is_match(p) {
+            out.push(p.to_path_buf());
         }
     }
     out.sort();

@@ -3,9 +3,15 @@
 //! entities could be recovered (§121: a malformed file must not take the project down).
 
 pub mod adr_md;
+pub mod batch;
+pub mod cargo_index;
 pub mod feature_md;
 pub mod frontmatter;
+pub mod junit;
 pub mod markdown;
+pub mod provenance;
+pub mod results_json;
+pub mod sniff;
 
 use crate::config::{EvidenceFormat, EvidenceSource, Located};
 use crate::hash::ContentHash;
@@ -44,6 +50,9 @@ pub struct ImportContext<'a> {
     pub source: Option<&'a EvidenceSource>,
     pub source_id: Option<SourceId>,
     pub now: Timestamp,
+    pub cargo: &'a cargo_index::CargoWorkspaceIndex,
+    pub sidecars: &'a provenance::SidecarIndex,
+    pub commits: &'a provenance::CommitLocator,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -64,6 +73,19 @@ impl RepoIndex {
     }
     pub fn prefix_of(&self, id: &RepoId) -> Option<&RelPath> {
         self.entries.iter().find(|(_, i)| i == id).map(|(p, _)| p)
+    }
+
+    /// Accepts a repo id (`plugin-doc`) or its project-relative path (`plugins/plugin-doc`).
+    pub fn resolve(&self, id_or_path: &str) -> Option<RepoId> {
+        let p = RelPath::new(id_or_path);
+        self.entries
+            .iter()
+            .find(|(path, id)| {
+                id.as_str() == id_or_path
+                    || (!path.is_root() && *path == p)
+                    || (path.is_root() && id_or_path == ".")
+            })
+            .map(|(_, id)| id.clone())
     }
 }
 
@@ -171,6 +193,10 @@ pub fn importer_for(kind: ImporterKind) -> Option<Box<dyn Importer>> {
     match kind {
         ImporterKind::FeatureMd => Some(Box::new(feature_md::FeatureMdImporter)),
         ImporterKind::AdrMd => Some(Box::new(adr_md::AdrMdImporter)),
+        ImporterKind::Evidence(EvidenceFormat::Junit) => Some(Box::new(junit::JunitImporter)),
+        ImporterKind::Evidence(
+            f @ (EvidenceFormat::CockpitResults | EvidenceFormat::PagedResults),
+        ) => Some(Box::new(results_json::ResultsJsonImporter { format: f })),
         ImporterKind::Evidence(_) => None,
     }
 }

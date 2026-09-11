@@ -325,6 +325,9 @@ mod tests {
             source: None,
             source_id: None,
             now: crate::time::parse_timestamp("2026-09-11T12:00:00Z").unwrap(),
+            cargo: &Default::default(),
+            sidecars: &Default::default(),
+            commits: &Default::default(),
         };
         let out = AdrMdImporter.import(&ctx, &input(rel, text));
         match out.entities.into_iter().next() {
@@ -431,6 +434,9 @@ pub(crate) mod tests_support {
             source: None,
             source_id: None,
             now: crate::time::parse_timestamp("2026-09-11T12:00:00Z").unwrap(),
+            cargo: &Default::default(),
+            sidecars: &Default::default(),
+            commits: &Default::default(),
         };
         let out = AdrMdImporter.import(&ctx, &input(rel, text));
         match out.entities.into_iter().next() {

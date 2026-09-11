@@ -186,3 +186,17 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 @media (max-width: 1024px) { .sidebar { width: 56px; padding: 12px 6px; } .sidebar .brand__name, .sidebar .nav__item span:first-child, .sidebar .nav__h, .sidebar__foot .muted { display: none; } .nav__item { justify-content: center; } .search-btn { width: 36px; } .search-btn span, .search-btn kbd { display: none; } }
 @media (max-width: 720px) { .sidebar { display: none; } .main { padding: var(--sp-3); } .ledger td.w-strip { display: none; } }
 @media print { .sidebar, .topbar, .banner, .toasts { display: none !important; } .main { padding: 0; max-width: none; } }
+
+/* ── Run strips, suites ───────────────────────────────────────────────── */
+.runs { display: inline-flex; gap: 2px; margin: 0; padding: 0; list-style: none; vertical-align: middle; }
+.run { display: inline-block; width: 7px; height: 14px; border-radius: 1px; background: var(--border-strong); }
+.run--passed { background: color-mix(in srgb, var(--healthy) 70%, var(--bg)); }
+.run--failed { background: var(--broken); }
+.run--flaky { background: var(--attention); }
+.run--skipped { background: var(--border); }
+.runs--lg { margin-bottom: 10px; } .runs--lg .run { width: 10px; height: 20px; }
+.suites { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--sp-3); }
+.suite { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--r-2); font-size: var(--fs-xs); color: var(--text-2); }
+.suite.is-on { border-color: var(--border-strong); color: var(--text); background: var(--surface-hover); }
+.suite--silent { border-color: color-mix(in srgb, var(--attention) 50%, var(--border)); }
+.output { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); padding: 10px 12px; overflow-x: auto; font-size: var(--fs-sm); max-height: 480px; white-space: pre-wrap; }

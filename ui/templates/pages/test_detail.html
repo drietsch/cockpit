@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block main %}
+<article class="detail">
+  <header class="detail__h row-{% if t.status == 'failed' %}broken{% elif t.status == 'flaky' %}attention{% endif %}">
+    <div class="detail__title"><h1>{{ t.name }}</h1></div>
+    <div class="detail__state">{{ m.status(t.status) }}{% if t.flaky_text %}<span class="detail__headline">{{ t.flaky_text }}</span>{% elif t.message %}<span class="detail__headline">{{ t.message | truncate_chars(140) }}</span>{% endif %}</div>
+    <dl class="kv kv--inline">
+      <dt>Kind</dt><dd>{{ t.kind }}</dd>
+      <dt>Suite</dt><dd class="mono">{{ t.suite }}</dd>
+      {% if t.features %}<dt>Feature</dt><dd>{% for f in t.features %}{{ m.feature_ref(f.id, f.title, f.state) }}{% if not f.explicit %} <span class="muted xs">({{ f.note }})</span>{% endif %} {% endfor %}</dd>{% endif %}
+      {% if t.source_path %}<dt>Source</dt><dd class="mono xs"><a href="{{ url_for('file', t.source_path, 'root') }}">{{ t.source_path }}</a></dd>{% endif %}
+      {% if latest and latest.commit %}<dt>Commit</dt><dd>{{ m.commit_ref(latest.commit.key.repo, latest.commit.key.sha, none, shell.multi_repo) }} <span class="muted xs">{{ latest.commit.origin }}{% if not latest.commit.resolved %} · not in local history{% endif %}</span></dd>{% endif %}
+      {% if t.duration_ms is not none %}<dt>Duration</dt><dd class="mono">{{ t.duration_ms | duration }}{% if duration_trend %} <span class="warn">{{ duration_trend.previous | duration }} → {{ duration_trend.latest | duration }} (+{{ (duration_trend.rel * 100) | round }}%)</span>{% endif %}</dd>{% endif %}
+      {% if latest and latest.browser %}<dt>Browser</dt><dd>{{ latest.browser }}{% if latest.viewport %} · {{ latest.viewport.width }}×{{ latest.viewport.height }}{% endif %}</dd>{% endif %}
+      <dt>Last run</dt><dd>{{ m.ago(t.last_run) }}</dd>
+    </dl>
+  </header>
+  <div class="grid-7-5">
+    <div>
+      {% if latest and (latest.message or latest.details) %}
+      <section>{{ m.section('Failure') }}
+        {% if latest.message %}<div class="sec">{{ latest.message }}</div>{% endif %}
+        {% if latest.details %}<pre class="output">{{ latest.details }}</pre>{% endif %}
+      </section>
+      {% endif %}
+      <section>{{ m.section('Runs (' ~ history | length ~ ')') }}
+        <ol class="runs runs--lg" aria-label="run history">{% for r in history | reverse %}<li class="run run--{{ r.status }}" title="{{ r.at | datetime('long') }} · {{ r.status }}"><span class="sr-only">{{ r.status }}</span></li>{% endfor %}</ol>
+        <table class="ledger">
+          <thead><tr><th class="w-icon"></th><th>When</th><th>Commit</th><th class="r">Duration</th><th>Message</th></tr></thead>
+          <tbody>{% for r in history %}<tr><td class="w-icon">{{ m.glyph(r.status) }}</td><td class="nowrap">{{ r.at | datetime }} <span class="muted xs">{{ m.ago(r.at) }}</span></td><td class="mono xs">{% if r.commit %}{{ m.commit_ref(r.commit.repo, r.commit.sha, none, shell.multi_repo) }}{% endif %}</td><td class="r mono">{% if r.duration_ms is not none %}{{ r.duration_ms | duration }}{% endif %}</td><td class="xs muted">{{ r.message or '' | truncate_chars(80) }}</td></tr>{% endfor %}</tbody>
+        </table>
+      </section>
+    </div>
+    <div>
+      {% if artifacts %}
+      <section>{{ m.section('Artifacts') }}
+        <ul class="list">{% for a in artifacts %}<li><a href="{{ a.url }}"{% if a.kind == 'trace' or a.kind == 'video' %} hx-boost="false"{% endif %}>{{ a.name }}</a> <span class="muted xs">{{ a.kind }}{% if a.role != 'plain' %} · {{ a.role }}{% endif %}{% if not a.exists %} · missing{% endif %}</span></li>{% endfor %}</ul>
+      </section>
+      {% endif %}
+      {% if suite %}
+      <section>{{ m.section('Suite') }}
+        <dl class="kv"><dt>Id</dt><dd class="mono">{{ suite.id }}</dd><dt>Source</dt><dd class="mono">{{ suite.source }}</dd><dt>Runs</dt><dd>{{ suite.run_count }}</dd>{% if suite.component %}<dt>Component</dt><dd class="mono">{{ suite.component }}</dd>{% endif %}{% if suite.last_seen %}<dt>Last seen</dt><dd>{{ m.ago(suite.last_seen) }}</dd>{% endif %}</dl>
+      </section>
+      {% endif %}
+      <section class="muted xs">Test id: <span class="mono">{{ t.id }}</span> · key: <span class="mono">{{ test.key }}</span></section>
+    </div>
+  </div>
+</article>
+{% endblock %}

@@ -24,7 +24,9 @@ pub fn router() -> Router<AppState> {
         .route("/adrs/{id}", get(adr_detail))
         .route("/status", get(status))
         .route("/search", get(search))
-        .route("/tests", get(coming_soon))
+        .route("/tests", get(tests))
+        .route("/tests/{id}", get(test_detail))
+        .route("/fragments/tests/table", get(tests_table_fragment))
         .route("/performance", get(coming_soon))
         .route("/visual", get(coming_soon))
 }
@@ -381,6 +383,303 @@ async fn features_table_fragment(
     )
 }
 
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Default, Clone)]
+pub struct TestFilter {
+    pub tab: String,
+    pub kind: Option<String>,
+    pub feature: Option<String>,
+    pub suite: Option<String>,
+    pub q: Option<String>,
+    pub sort: String,
+    pub limit: usize,
+}
+
+impl TestFilter {
+    pub fn from_query(q: &HashMap<String, String>) -> TestFilter {
+        TestFilter {
+            tab: q.get("status").cloned().filter(|s| !s.is_empty()).unwrap_or_else(|| "all".into()),
+            kind: q.get("kind").filter(|s| !s.is_empty()).cloned(),
+            feature: q.get("feature").filter(|s| !s.is_empty()).cloned(),
+            suite: q.get("suite").filter(|s| !s.is_empty()).cloned(),
+            q: q.get("q").filter(|s| !s.is_empty()).cloned(),
+            sort: q.get("sort").cloned().unwrap_or_else(|| "status".into()),
+            limit: q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(200),
+        }
+    }
+    pub fn canonical(&self) -> String {
+        let mut parts = Vec::new();
+        if self.tab != "all" {
+            parts.push(format!("status={}", self.tab));
+        }
+        for (k, v) in [
+            ("kind", &self.kind),
+            ("feature", &self.feature),
+            ("suite", &self.suite),
+            ("q", &self.q),
+        ] {
+            if let Some(v) = v {
+                parts.push(format!("{k}={}", super::view::urlencode(v)));
+            }
+        }
+        if self.sort != "status" {
+            parts.push(format!("sort={}", self.sort));
+        }
+        if self.limit != 200 {
+            parts.push(format!("limit={}", self.limit));
+        }
+        if parts.is_empty() { String::new() } else { format!("?{}", parts.join("&")) }
+    }
+}
+
+fn status_rank(t: &crate::state::TestView) -> u8 {
+    match t.latest.as_ref().map(|r| r.status) {
+        Some(TestStatus::Failed) => 0,
+        _ if t.flaky => 1,
+        Some(TestStatus::Flaky) => 1,
+        Some(TestStatus::Skipped) => 3,
+        None => 4,
+        _ => 2,
+    }
+}
+
+pub fn test_row(st: &ProjectState, t: &crate::state::TestView) -> Value {
+    let status = if t.flaky
+        && t.latest.as_ref().map(|r| r.status != TestStatus::Failed).unwrap_or(false)
+    {
+        "flaky".to_string()
+    } else {
+        t.latest.as_ref().map(|r| r.status.as_str().to_string()).unwrap_or_else(|| "unknown".into())
+    };
+    let feats: Vec<Value> = t
+        .features
+        .iter()
+        .map(|(id, o)| context! { id => id.as_str(), title => st.features.get(id).map(|f| f.feature.title.clone()).unwrap_or_else(|| id.to_string()), explicit => o.is_explicit(), note => o.note(), state => st.features.get(id).map(|f| f.health.state.as_str()).unwrap_or("unknown") })
+        .collect();
+    let strip: Vec<&str> = t.history.iter().take(10).map(|r| r.status.as_str()).collect();
+    let suite_name = st
+        .suites
+        .iter()
+        .find(|s| s.id == t.test.suite)
+        .map(|s| s.id.as_str().to_string())
+        .unwrap_or_else(|| t.test.suite.to_string());
+    context! {
+        id => t.test.id.as_str(),
+        name => t.test.name.clone(),
+        classname => t.test.classname.clone(),
+        status => status,
+        kind => t.test.kind.as_str(),
+        suite => suite_name,
+        features => feats,
+        duration_ms => t.latest.as_ref().and_then(|r| r.duration_ms),
+        last_run => t.latest.as_ref().map(|r| r.timestamp.value.to_string()),
+        strip => strip,
+        flaky => t.flaky,
+        flaky_text => t.flaky_text.clone(),
+        source_path => t.test.source_path.as_ref().map(|p| p.as_str().to_string()),
+        message => t.latest.as_ref().and_then(|r| r.message.clone()),
+    }
+}
+
+pub fn filtered_tests<'a>(st: &'a ProjectState, f: &TestFilter) -> Vec<&'a crate::state::TestView> {
+    let q = f.q.as_ref().map(|s| s.to_ascii_lowercase());
+    let mut rows: Vec<&crate::state::TestView> = st
+        .tests
+        .values()
+        .filter(|t| match f.tab.as_str() {
+            "failing" => t.latest.as_ref().map(|r| r.status == TestStatus::Failed).unwrap_or(false),
+            "flaky" => {
+                t.flaky || t.latest.as_ref().map(|r| r.status == TestStatus::Flaky).unwrap_or(false)
+            }
+            "slow" => {
+                t.latest.as_ref().and_then(|r| r.duration_ms).map(|d| d >= 1000).unwrap_or(false)
+            }
+            "recent" => t
+                .latest
+                .as_ref()
+                .map(|r| crate::time::now().duration_since(r.timestamp.value).as_secs() < 86_400)
+                .unwrap_or(false),
+            "unlinked" => t.features.is_empty(),
+            _ => true,
+        })
+        .filter(|t| f.kind.as_ref().map(|k| t.test.kind.as_str() == k).unwrap_or(true))
+        .filter(|t| {
+            f.feature
+                .as_ref()
+                .map(|fid| {
+                    if fid == "none" {
+                        t.features.is_empty()
+                    } else {
+                        t.features.iter().any(|(id, _)| id.as_str() == fid)
+                    }
+                })
+                .unwrap_or(true)
+        })
+        .filter(|t| f.suite.as_ref().map(|s| t.test.suite.as_str() == s).unwrap_or(true))
+        .filter(|t| match &q {
+            Some(q) => {
+                t.test.name.to_ascii_lowercase().contains(q)
+                    || t.test.key.to_ascii_lowercase().contains(q)
+            }
+            None => true,
+        })
+        .collect();
+    match f.sort.as_str() {
+        "duration" => rows.sort_by(|a, b| {
+            b.latest
+                .as_ref()
+                .and_then(|r| r.duration_ms)
+                .cmp(&a.latest.as_ref().and_then(|r| r.duration_ms))
+        }),
+        "recent" => rows.sort_by(|a, b| {
+            b.latest
+                .as_ref()
+                .map(|r| r.timestamp.value)
+                .cmp(&a.latest.as_ref().map(|r| r.timestamp.value))
+        }),
+        "name" => rows.sort_by(|a, b| a.test.name.cmp(&b.test.name)),
+        _ => rows.sort_by(|a, b| {
+            status_rank(a).cmp(&status_rank(b)).then_with(|| a.test.name.cmp(&b.test.name))
+        }),
+    }
+    rows
+}
+
+fn tests_table_ctx(st: &ProjectState, f: &TestFilter) -> Value {
+    let all = filtered_tests(st, f);
+    let total = all.len();
+    let rows: Vec<Value> = all.iter().take(f.limit).map(|t| test_row(st, t)).collect();
+    let failing = st
+        .tests
+        .values()
+        .filter(|t| t.latest.as_ref().map(|r| r.status == TestStatus::Failed).unwrap_or(false))
+        .count();
+    let flaky = st
+        .tests
+        .values()
+        .filter(|t| {
+            t.flaky || t.latest.as_ref().map(|r| r.status == TestStatus::Flaky).unwrap_or(false)
+        })
+        .count();
+    let unlinked = st.tests.values().filter(|t| t.features.is_empty()).count();
+    let suites: Vec<Value> = st
+        .suites
+        .iter()
+        .map(|s| {
+            let silent = st.attention.iter().find(|a| a.reason == AttentionReason::SuiteSilent && a.subject == s.id.0).map(|a| a.summary.clone());
+            let n = st.tests.values().filter(|t| t.test.suite == s.id).count();
+            context! { id => s.id.as_str(), name => s.name.clone(), kind => s.default_kind.as_str(), tests => n, last_seen => s.last_seen.map(|t| t.to_string()), runs => s.run_count, silent => silent, component => s.component.as_ref().map(|c| c.as_str().to_string()) }
+        })
+        .collect();
+    context! {
+        rows => rows, total => total, shown => rows.len(),
+        filter => context! { tab => f.tab.clone(), kind => f.kind.clone(), feature => f.feature.clone(), suite => f.suite.clone(), q => f.q.clone(), sort => f.sort.clone() },
+        query => f.canonical(),
+        counts => context! { all => st.tests.len(), failing => failing, flaky => flaky, unlinked => unlinked },
+        suites => suites,
+        sources => Value::from_serialize(&st.sources),
+    }
+}
+
+async fn tests(
+    hx: Hx,
+    State(app): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Result<Page, AppError> {
+    let st = app.state.load();
+    let f = TestFilter::from_query(&q);
+    render(
+        &app,
+        &hx,
+        "pages/tests.html",
+        "Tests",
+        "tests",
+        context! { table => tests_table_ctx(&st, &f) },
+    )
+}
+
+async fn tests_table_fragment(
+    State(app): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Result<Page, AppError> {
+    let st = app.state.load();
+    let f = TestFilter::from_query(&q);
+    fragment(
+        &app,
+        "fragments/tests_table.html",
+        context! { table => tests_table_ctx(&st, &f) },
+        Some(format!("/tests{}", f.canonical())),
+    )
+}
+
+async fn test_detail(
+    hx: Hx,
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Page, AppError> {
+    let st = app.state.load();
+    let Some(t) = st.tests.get(&crate::ids::TestId::new(id.clone())) else {
+        return Err(AppError::NotFound { kind: "test", id, suggestions: vec![] });
+    };
+    let history: Vec<Value> = t
+        .history
+        .iter()
+        .map(|r| context! { id => r.id.as_str(), status => r.status.as_str(), at => r.timestamp.value.to_string(), duration_ms => r.duration_ms, retries => r.retries, commit => r.commit.as_ref().map(|c| context! { repo => c.key.repo.as_str(), sha => c.key.sha.as_str(), short => c.key.sha.short(), origin => c.origin.as_str(), resolved => c.resolved }), message => r.message.clone(), run => r.run.as_str() })
+        .collect();
+    let artifacts: Vec<Value> = t
+        .latest
+        .iter()
+        .flat_map(|r| r.artifacts.iter())
+        .filter_map(|a| st.artifacts.get(a))
+        .map(|a| context! { id => a.id.as_str(), kind => a.kind.as_str(), role => a.role.as_str(), name => a.name.clone(), url => artifact_url(&st, a), exists => a.exists })
+        .collect();
+    let suite = st.suites.iter().find(|s| s.id == t.test.suite);
+    let run = t.latest.as_ref().and_then(|r| st_run(&st, &r.run));
+    render(
+        &app,
+        &hx,
+        "pages/test_detail.html",
+        &t.test.name,
+        "tests",
+        context! {
+            t => test_row(&st, t),
+            test => Value::from_serialize(&t.test),
+            latest => t.latest.as_ref().map(Value::from_serialize),
+            history => history,
+            artifacts => artifacts,
+            suite => suite.map(Value::from_serialize),
+            run => run,
+            duration_trend => t.duration_trend.map(|(p, l, r)| context! { previous => p, latest => l, rel => r }),
+            entity_id => t.test.id.as_str(),
+        },
+    )
+}
+
+fn st_run(_st: &ProjectState, _run: &crate::ids::RunId) -> Option<Value> {
+    None
+}
+
+pub fn artifact_url(st: &ProjectState, a: &Artifact) -> String {
+    match &a.path {
+        ArtifactPath::Url(u) => u.clone(),
+        ArtifactPath::Project(p) => {
+            let repo = repo_of_path(st, p.as_str());
+            let prefix = st
+                .project
+                .repos
+                .iter()
+                .find(|r| r.id.as_str() == repo)
+                .map(|r| r.path.clone())
+                .unwrap_or_else(crate::paths::RelPath::root);
+            let inner = p.strip_prefix(&prefix).unwrap_or_else(|| p.clone());
+            format!("/artifacts/{}/{}", super::view::urlencode(&repo), inner.as_str())
+        }
+        ArtifactPath::EvidenceCache(p) => format!("/artifacts/evidence/{}", p.as_str()),
+        ArtifactPath::External(p) => format!("/artifacts/external/{}", p.display()),
+    }
+}
+
 pub fn feature_detail_json(st: &ProjectState, v: &FeatureView) -> serde_json::Value {
     serde_json::json!({
         "feature": v.feature,
@@ -468,6 +767,8 @@ async fn feature_detail(
             entity_id => f.id.as_str(),
             sources => Value::from_serialize(&st.sources),
             source_path => f.source.as_str(),
+            tests => v.tests.iter().filter_map(|t| st.tests.get(t)).take(50).map(|t| test_row(&st, t)).collect::<Vec<_>>(),
+            tests_total => v.tests.len(),
         },
     )
 }

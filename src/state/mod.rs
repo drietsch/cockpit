@@ -3,7 +3,10 @@
 
 pub mod attention;
 pub mod build;
+pub mod freshness;
 pub mod health;
+pub mod rollup;
+pub mod test_history;
 
 use crate::ids::*;
 use crate::model::*;
@@ -190,6 +193,11 @@ impl ProjectState {
     pub fn find_commits(&self, prefix: &str) -> Vec<&CommitView> {
         let p = prefix.to_ascii_lowercase();
         self.commits.values().filter(|c| c.commit.key.sha.as_str().starts_with(&p)).collect()
+    }
+
+    /// Attention items a person should act on (informational ones are opt-in).
+    pub fn actionable_attention(&self) -> impl Iterator<Item = &AttentionItem> {
+        self.attention.iter().filter(|a| a.severity != Severity::Informational)
     }
 
     pub fn features_sorted(&self) -> Vec<&FeatureView> {

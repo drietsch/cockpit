@@ -1,15 +1,17 @@
-//! Feature health evaluation (§21–§22). M0 knows about implementation commits and unresolved
-//! references; evidence rollups arrive with the test/benchmark/visual importers.
+//! Feature health evaluation (§20–§22, §192): rollups per evidence category, then the four
+//! states with explicit reasons and a "why" chain.
 
 use crate::config::Config;
-use crate::ids::{CommitKey, FeatureId};
+use crate::ids::CommitKey;
 use crate::model::*;
 use jiff::Timestamp;
 
-/// Evidence gathered for one feature (empty until evidence importers exist).
+/// Everything known about one feature's evidence, already rolled up per category.
 #[derive(Default, Debug, Clone)]
 pub struct Evidence {
     pub rollups: Vec<KindRollup>,
+    /// Extra reasons produced while rolling up (flaky tests, duration regressions, drift …).
+    pub extra_reasons: Vec<HealthReason>,
 }
 
 pub fn evaluate(
@@ -25,6 +27,14 @@ pub fn evaluate(
     let mut chain: Vec<ExplainStep> = Vec::new();
     let importance = feature.importance.as_str();
     let required = cfg.health.required_for(importance);
+    let required_cats: Vec<EvidenceCategory> =
+        required.iter().filter_map(|r| EvidenceCategory::parse(r)).collect();
+    let broken_kinds: Vec<EvidenceCategory> = cfg
+        .health
+        .broken_on_failure_kinds
+        .iter()
+        .filter_map(|k| EvidenceCategory::parse(k))
+        .collect();
     let has_any = evidence
         .rollups
         .iter()
@@ -46,10 +56,9 @@ pub fn evaluate(
     }
 
     let state;
-    let confidence;
+    let mut confidence = Confidence::High;
     if !has_any {
         state = HealthState::Unknown;
-        confidence = Confidence::High;
         chain.push(ExplainStep {
             connective: "given".into(),
             text: "no test, visual or performance evidence is linked to this feature".into(),
@@ -67,8 +76,7 @@ pub fn evaluate(
                 reason: AttentionReason::MissingRequiredTest,
                 severity: sev,
                 text: format!(
-                    "{} feature requires {} evidence; none is linked",
-                    importance,
+                    "{importance} feature requires {} evidence; none is linked",
                     required.join(" + ")
                 ),
                 evidence: vec![],
@@ -92,9 +100,252 @@ pub fn evaluate(
             refs: vec![],
         });
     } else {
-        // Evidence-driven states are computed in the M1 evaluator.
-        state = HealthState::Healthy;
-        confidence = Confidence::Medium;
+        let mut broken = false;
+        for r in &evidence.rollups {
+            let is_required = required_cats.contains(&r.category);
+            let label = r.category.label();
+            match r.status {
+                RollupStatus::Fail => {
+                    let gate = broken_kinds.contains(&r.category) || is_required;
+                    if gate {
+                        broken = true;
+                    }
+                    reasons.push(HealthReason {
+                        reason: if r.category == EvidenceCategory::Visual {
+                            AttentionReason::VisualRegression
+                        } else {
+                            AttentionReason::TestFailed
+                        },
+                        severity: if gate { Severity::High } else { Severity::Medium },
+                        text: format!("{label}: {}", r.summary),
+                        evidence: r.refs.clone(),
+                        confidence: r
+                            .freshness
+                            .as_ref()
+                            .map(|f| f.confidence)
+                            .unwrap_or(Confidence::Medium),
+                        subject: r.category.as_str().into(),
+                        commit: r.freshness.as_ref().and_then(|f| f.against.clone()),
+                        category: Some(r.category),
+                    });
+                    let when = match r.freshness.as_ref().map(|f| f.change) {
+                        Some(ChangeFreshness::Fresh) => " after the latest implementation change",
+                        _ => "",
+                    };
+                    chain.push(ExplainStep {
+                        connective: "because".into(),
+                        text: format!("{label} evidence is failing{when}: {}", r.summary),
+                        refs: r.refs.clone(),
+                    });
+                }
+                RollupStatus::StaleFail => {
+                    reasons.push(HealthReason {
+                        reason: AttentionReason::TestFailed,
+                        severity: Severity::Medium,
+                        text: format!("{label}: {} — the failure predates the latest implementation change and may be fixed", r.summary),
+                        evidence: r.refs.clone(),
+                        confidence: Confidence::Low,
+                        subject: r.category.as_str().into(),
+                        commit: r.freshness.as_ref().and_then(|f| f.against.clone()),
+                        category: Some(r.category),
+                    });
+                    chain.push(ExplainStep { connective: "but".into(), text: format!("the last {label} failure was recorded before the implementation changed"), refs: r.refs.clone() });
+                }
+                RollupStatus::Flaky => {
+                    reasons.push(HealthReason {
+                        reason: AttentionReason::TestFlaky,
+                        severity: if feature.importance == Importance::Low {
+                            Severity::Low
+                        } else {
+                            Severity::Medium
+                        },
+                        text: format!("{label}: {}", r.summary),
+                        evidence: r.refs.clone(),
+                        confidence: Confidence::High,
+                        subject: r.category.as_str().into(),
+                        commit: None,
+                        category: Some(r.category),
+                    });
+                }
+                RollupStatus::Stale => {
+                    reasons.push(HealthReason {
+                        reason: if r.category == EvidenceCategory::Visual {
+                            AttentionReason::VisualStale
+                        } else {
+                            AttentionReason::StaleEvidence
+                        },
+                        severity: if is_required { Severity::Medium } else { Severity::Low },
+                        text: format!("{label}: {}", r.summary),
+                        evidence: r.refs.clone(),
+                        confidence: r
+                            .freshness
+                            .as_ref()
+                            .map(|f| f.confidence)
+                            .unwrap_or(Confidence::Medium),
+                        subject: r.category.as_str().into(),
+                        commit: r.freshness.as_ref().and_then(|f| f.against.clone()),
+                        category: Some(r.category),
+                    });
+                    chain.push(ExplainStep {
+                        connective: "but".into(),
+                        text: format!("{label} evidence predates the latest implementation change"),
+                        refs: r.refs.clone(),
+                    });
+                }
+                RollupStatus::Regression => {
+                    reasons.push(HealthReason {
+                        reason: AttentionReason::BenchmarkRegression,
+                        severity: Severity::Medium,
+                        text: format!("{label}: {}", r.summary),
+                        evidence: r.refs.clone(),
+                        confidence: Confidence::Medium,
+                        subject: r.category.as_str().into(),
+                        commit: None,
+                        category: Some(r.category),
+                    });
+                    chain.push(ExplainStep {
+                        connective: "because".into(),
+                        text: r.summary.clone(),
+                        refs: r.refs.clone(),
+                    });
+                }
+                RollupStatus::BudgetBreach => {
+                    broken = true;
+                    reasons.push(HealthReason {
+                        reason: AttentionReason::BenchmarkBudgetBreach,
+                        severity: Severity::High,
+                        text: format!("{label}: {}", r.summary),
+                        evidence: r.refs.clone(),
+                        confidence: Confidence::High,
+                        subject: r.category.as_str().into(),
+                        commit: None,
+                        category: Some(r.category),
+                    });
+                    chain.push(ExplainStep {
+                        connective: "because".into(),
+                        text: r.summary.clone(),
+                        refs: r.refs.clone(),
+                    });
+                }
+                RollupStatus::Incomparable => {
+                    reasons.push(HealthReason {
+                        reason: AttentionReason::BenchmarkIncomparable,
+                        severity: Severity::Low,
+                        text: format!("{label}: {}", r.summary),
+                        evidence: r.refs.clone(),
+                        confidence: Confidence::High,
+                        subject: r.category.as_str().into(),
+                        commit: None,
+                        category: Some(r.category),
+                    });
+                }
+                RollupStatus::Missing | RollupStatus::Silent
+                    if is_required
+                        && !matches!(
+                            feature.lifecycle,
+                            Lifecycle::Planned | Lifecycle::Retired
+                        ) =>
+                {
+                    reasons.push(HealthReason {
+                        reason: if r.category == EvidenceCategory::Visual {
+                            AttentionReason::VisualMissing
+                        } else {
+                            AttentionReason::MissingRequiredTest
+                        },
+                        severity: if feature.importance == Importance::Critical {
+                            Severity::High
+                        } else {
+                            Severity::Medium
+                        },
+                        text: format!(
+                            "{label} evidence is required for a {importance} feature but {}",
+                            if r.status == RollupStatus::Silent {
+                                "the latest run produced no results"
+                            } else {
+                                "none is linked"
+                            }
+                        ),
+                        evidence: r.refs.clone(),
+                        confidence: Confidence::High,
+                        subject: r.category.as_str().into(),
+                        commit: None,
+                        category: Some(r.category),
+                    });
+                    chain.push(ExplainStep {
+                        connective: "and".into(),
+                        text: format!("{label} evidence is required but missing"),
+                        refs: vec![],
+                    });
+                }
+                _ => {}
+            }
+            if let Some(f) = &r.freshness {
+                if !matches!(r.status, RollupStatus::Missing | RollupStatus::Silent) {
+                    confidence = confidence.min(f.confidence);
+                }
+            }
+        }
+        // Partial revalidation: some kinds re-ran after the change, others did not.
+        let fresh_kinds = evidence
+            .rollups
+            .iter()
+            .filter(|r| {
+                r.freshness.as_ref().map(|f| f.change == ChangeFreshness::Fresh).unwrap_or(false)
+            })
+            .count();
+        let stale_kinds = evidence
+            .rollups
+            .iter()
+            .filter(|r| matches!(r.status, RollupStatus::Stale | RollupStatus::StaleFail))
+            .count();
+        if fresh_kinds > 0 && stale_kinds > 0 {
+            reasons.push(HealthReason {
+                reason: AttentionReason::IncompleteRevalidation,
+                severity: Severity::Medium,
+                text: format!("{fresh_kinds} evidence kind{} re-ran after the latest change, {stale_kinds} did not", if fresh_kinds == 1 { "" } else { "s" }),
+                evidence: vec![],
+                confidence: Confidence::Medium,
+                subject: "revalidation".into(),
+                commit: impl_commit.cloned(),
+                category: None,
+            });
+        }
+        reasons.extend(evidence.extra_reasons.iter().cloned());
+        state = if broken {
+            HealthState::Broken
+        } else if reasons.iter().any(|r| r.severity != Severity::Informational) {
+            HealthState::Attention
+        } else {
+            HealthState::Healthy
+        };
+        if state == HealthState::Healthy {
+            let passing: Vec<String> = evidence
+                .rollups
+                .iter()
+                .filter(|r| r.status == RollupStatus::Pass)
+                .map(|r| r.category.label().to_string())
+                .collect();
+            chain.push(ExplainStep { connective: "given".into(), text: format!("{} evidence is passing and was generated after the latest implementation change", passing.join(", ")), refs: vec![] });
+            chain.push(ExplainStep {
+                connective: "therefore".into(),
+                text: "Healthy".into(),
+                refs: vec![],
+            });
+        } else {
+            chain.push(ExplainStep {
+                connective: "therefore".into(),
+                text: format!(
+                    "{}{}",
+                    state.label(),
+                    if state == HealthState::Attention {
+                        " — nothing gating has failed, but the evidence has gaps"
+                    } else {
+                        ""
+                    }
+                ),
+                refs: vec![],
+            });
+        }
     }
 
     let headline = match state {
@@ -105,15 +356,21 @@ pub fn evaluate(
             ),
             None => "No evidence linked yet".into(),
         },
-        HealthState::Healthy => "All linked evidence is passing".into(),
-        HealthState::Attention => {
-            reasons.first().map(|r| r.text.clone()).unwrap_or_else(|| "Needs attention".into())
+        HealthState::Healthy => {
+            let n: u32 = evidence.rollups.iter().map(|r| r.counts.passed).sum();
+            format!(
+                "All linked evidence is passing ({} test{} current)",
+                n,
+                if n == 1 { "" } else { "s" }
+            )
         }
-        HealthState::Broken => {
-            reasons.first().map(|r| r.text.clone()).unwrap_or_else(|| "Broken".into())
-        }
+        HealthState::Attention | HealthState::Broken => reasons
+            .iter()
+            .filter(|r| r.severity != Severity::Informational)
+            .map(|r| r.text.clone())
+            .next()
+            .unwrap_or_else(|| state.label().into()),
     };
-
     let rank_score = rank(feature, state, &reasons, now, impl_at);
     FeatureHealth {
         state,
@@ -171,6 +428,3 @@ pub fn rank(
     }
     s
 }
-
-#[allow(dead_code)]
-fn _id(_f: &FeatureId) {}

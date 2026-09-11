@@ -36,10 +36,23 @@ impl ProjectBuilder {
     }
 
     pub fn file(self, rel: &str, content: &str) -> Self {
+        self.put_file(rel, content);
+        self
+    }
+
+    /// Non-consuming variant for use after the project is built.
+    pub fn put_file(&self, rel: &str, content: &str) {
         let p = self.root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, content).unwrap();
-        self
+    }
+
+    pub fn put_commit(&self, subject: &str, at: &str, files: &[(&str, &str)]) {
+        for (p, c) in files {
+            self.put_file(p, c);
+        }
+        git(&self.root, &["add", "-A"], at);
+        git(&self.root, &["commit", "-q", "--allow-empty", "-m", subject], at);
     }
 
     pub fn feature(
@@ -97,6 +110,11 @@ impl ProjectBuilder {
 
     /// A nextest-style JUnit file.
     pub fn junit(self, rel: &str, report: &str, cases: &[JunitCase], timestamp: &str) -> Self {
+        self.put_junit(rel, report, cases, timestamp);
+        self
+    }
+
+    pub fn put_junit(&self, rel: &str, report: &str, cases: &[JunitCase], timestamp: &str) {
         let mut suites: std::collections::BTreeMap<&str, Vec<&JunitCase>> = Default::default();
         for c in cases {
             suites.entry(c.classname).or_default().push(c);
@@ -123,7 +141,7 @@ impl ProjectBuilder {
             xml.push_str("  </testsuite>\n");
         }
         xml.push_str("</testsuites>\n");
-        self.file(rel, &xml)
+        self.put_file(rel, &xml);
     }
 
     pub fn located(&self) -> Located {

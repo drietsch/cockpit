@@ -40,6 +40,7 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
     let adrs = store.adrs()?;
     let all_commits = store.all_commits()?;
     let warnings = store.warnings()?;
+    let _ = &warnings;
 
     let idx = FeatureIdIndex::build(&features, cfg.features.id_pattern.as_deref());
     let ownership = PathOwnership::build(&features);
@@ -272,12 +273,105 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
         );
     }
 
-    // Feature views with (M0) health.
+    // Evidence: suites, tests, recent runs, visuals; per-test history; test → feature links.
+    let suites = store.suites()?;
+    let tests_raw = store.tests()?;
+    let recent_runs = store.recent_test_runs(cfg.health.flaky_window as usize)?;
+    let visuals_raw = store.recent_visuals()?;
+    let artifacts_raw = store.artifacts()?;
+    let environments_raw = store.environments()?;
+    let mut runs_by_test: HashMap<TestId, Vec<TestRun>> = HashMap::new();
+    for tr in recent_runs {
+        runs_by_test.entry(tr.test.clone()).or_default().push(tr);
+    }
+    for v in runs_by_test.values_mut() {
+        v.sort_by(|a, b| b.timestamp.value.cmp(&a.timestamp.value).then_with(|| b.id.cmp(&a.id)));
+    }
+    let (test_map, map_warnings) = crate::link::test_map::load(input.located);
+    let mut warnings = warnings;
+    for w in map_warnings {
+        warnings.push(ImportWarning {
+            path: crate::paths::RelPath::new("cockpit.toml"),
+            importer: "test-map".into(),
+            message: w,
+            location: None,
+            fatal: false,
+        });
+    }
+    let links =
+        crate::link::test_link::link_tests(&tests_raw, &suites, &idx, &ownership, &test_map);
+    relationships.extend(links.relationships.iter().cloned());
+    unresolved.extend(links.unresolved.iter().cloned());
+    let mut tests: BTreeMap<TestId, TestView> = BTreeMap::new();
+    let mut feature_tests: HashMap<FeatureId, Vec<TestId>> = HashMap::new();
+    for t in tests_raw {
+        let history = runs_by_test.remove(&t.id).unwrap_or_default();
+        let h = crate::state::test_history::analyse(&history, &cfg.health);
+        let feats = links.by_test.get(&t.id).cloned().unwrap_or_default();
+        for (f, _) in &feats {
+            feature_tests.entry(f.clone()).or_default().push(t.id.clone());
+        }
+        tests.insert(
+            t.id.clone(),
+            TestView {
+                test: t,
+                features: feats,
+                latest: history.first().cloned(),
+                history,
+                flaky: h.flaky,
+                flaky_text: h.flaky_text,
+                duration_trend: h.duration_trend,
+            },
+        );
+    }
+    // Visual checks: latest + previous per check, linked through their test (or declared ids).
+    let mut visuals: BTreeMap<VisualCheckId, VisualView> = BTreeMap::new();
+    let mut by_check: HashMap<VisualCheckId, Vec<VisualEvidence>> = HashMap::new();
+    for v in visuals_raw {
+        by_check.entry(v.check.clone()).or_default().push(v);
+    }
+    let mut feature_visuals: HashMap<FeatureId, Vec<VisualCheckId>> = HashMap::new();
+    for (check, mut evs) in by_check {
+        evs.sort_by_key(|e| std::cmp::Reverse(e.timestamp.value));
+        let latest = evs.remove(0);
+        let mut feats: Vec<(FeatureId, RelationOrigin)> = latest
+            .test
+            .as_ref()
+            .and_then(|t| tests.get(t))
+            .map(|t| t.features.clone())
+            .unwrap_or_default();
+        for raw in &latest.declared_feature_ids {
+            if let Some(id) = idx.resolve(raw) {
+                if !feats.iter().any(|(f, _)| f == &id) {
+                    feats.push((id, RelationOrigin::Explicit(ExplicitSource::Interchange)));
+                }
+            }
+        }
+        for (f, _) in &feats {
+            feature_visuals.entry(f.clone()).or_default().push(check.clone());
+        }
+        visuals.insert(
+            check,
+            VisualView { latest, previous: evs.into_iter().next(), features: feats },
+        );
+    }
+    // Commit graphs per repo for freshness.
+    let mut graphs: HashMap<RepoId, CommitGraph> = HashMap::new();
+    for c in &all_commits {
+        graphs.entry(c.key.repo.clone()).or_default().insert(
+            c.key.sha.clone(),
+            c.parents.clone(),
+            c.committed_at,
+        );
+    }
+    let max_age = cfg.health.max_evidence_age();
+
+    // Feature views with health.
     let mut feature_views: BTreeMap<FeatureId, FeatureView> = BTreeMap::new();
     for f in features {
-        let mut links = feature_commits.remove(&f.id).unwrap_or_default();
-        links.sort_by_key(|l| std::cmp::Reverse(l.committed_at));
-        links.truncate(200);
+        let mut links_c = feature_commits.remove(&f.id).unwrap_or_default();
+        links_c.sort_by_key(|l| std::cmp::Reverse(l.committed_at));
+        links_c.truncate(200);
         let impl_commit = impl_candidates.remove(&f.id).and_then(|c| {
             graph
                 .newest(c.iter().map(|(k, _)| &k.sha))
@@ -290,9 +384,80 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
         let mut adr_list = feature_adrs.remove(&f.id).unwrap_or_default();
         adr_list.sort();
         adr_list.dedup();
+        let test_ids = feature_tests.remove(&f.id).unwrap_or_default();
+        let visual_ids = feature_visuals.remove(&f.id).unwrap_or_default();
+        let required: Vec<EvidenceCategory> = cfg
+            .health
+            .required_for(f.importance.as_str())
+            .iter()
+            .filter_map(|r| EvidenceCategory::parse(r))
+            .collect();
+        let fin = crate::state::freshness::FreshnessInput {
+            graphs: &graphs,
+            impl_commit: impl_key.as_ref(),
+            impl_at,
+            max_age,
+            now,
+        };
+        let tviews: Vec<&TestView> = test_ids.iter().filter_map(|t| tests.get(t)).collect();
+        let vviews: Vec<&VisualEvidence> =
+            visual_ids.iter().filter_map(|v| visuals.get(v)).map(|v| &v.latest).collect();
+        let rollups = crate::state::rollup::rollups(&crate::state::rollup::RollupInput {
+            tests: tviews.clone(),
+            visuals: vviews,
+            required: &required,
+            freshness: &fin,
+        });
+        let mut extra_reasons = Vec::new();
+        for t in &tviews {
+            if let Some((prev, latest, rel)) = t.duration_trend {
+                extra_reasons.push(HealthReason {
+                    reason: AttentionReason::TestDurationRegression,
+                    severity: Severity::Low,
+                    text: format!(
+                        "{}: {} → {} (+{:.0}%)",
+                        t.test.name,
+                        crate::server::view::duration_ms(prev as f64),
+                        crate::server::view::duration_ms(latest as f64),
+                        rel * 100.0
+                    ),
+                    evidence: vec![EvidenceRef::new(
+                        EvidenceKind::Test,
+                        t.test.id.as_str(),
+                        &t.test.name,
+                    )],
+                    confidence: Confidence::Medium,
+                    subject: t.test.id.0.clone(),
+                    commit: None,
+                    category: Some(t.test.kind.category()),
+                });
+            }
+        }
+        // Claims vs evidence drift (informational): a component claimed shipped with no evidence.
+        for c in &f.claims {
+            if c.status == ClaimStatus::Shipped {
+                let has = tviews.iter().any(|t| t.test.component.as_ref() == Some(&c.component));
+                if !has && !tviews.is_empty() {
+                    extra_reasons.push(HealthReason {
+                        reason: AttentionReason::UnverifiedClaim,
+                        severity: Severity::Informational,
+                        text: format!(
+                            "claims {} shipped, but no linked test runs on that component",
+                            c.component
+                        ),
+                        evidence: vec![],
+                        confidence: Confidence::Medium,
+                        subject: c.component.0.clone(),
+                        commit: None,
+                        category: None,
+                    });
+                }
+            }
+        }
+        let evidence = crate::state::health::Evidence { rollups, extra_reasons };
         let health = crate::state::health::evaluate(
             &f,
-            &crate::state::health::Evidence::default(),
+            &evidence,
             impl_key.as_ref(),
             impl_at,
             &unresolved,
@@ -306,18 +471,74 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
                 health,
                 impl_commit: impl_key,
                 impl_committed_at: impl_at,
-                commits: links,
+                commits: links_c,
                 adrs: adr_list,
-                tests: vec![],
+                tests: test_ids,
                 benchmarks: vec![],
-                visuals: vec![],
+                visuals: visual_ids,
             },
         );
     }
 
+    // Suite views: silence.
+    let mut suite_views: Vec<Suite> = suites.clone();
+    suite_views.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut suite_reasons: Vec<AttentionItem> = Vec::new();
+    for su in &suite_views {
+        let Some(expect) = su.expect_every else { continue };
+        match su.last_seen {
+            Some(seen) if now.duration_since(seen) > expect => suite_reasons
+                .push(suite_silent_item(su, Some(now.duration_since(seen)), expect, now)),
+            None => suite_reasons.push(suite_silent_item(su, None, expect, now)),
+            _ => {}
+        }
+    }
+    let unlinked_items: Vec<AttentionItem> = links
+        .unlinked
+        .iter()
+        .map(|(suite, ids)| AttentionItem {
+            id: crate::ids::AttentionId::derive("unlinked_tests", None, suite),
+            reason: AttentionReason::UnlinkedTests,
+            severity: Severity::Informational,
+            status: AttentionStatus::Open,
+            feature: None,
+            feature_title: None,
+            subject: suite.clone(),
+            title: "Unlinked tests".into(),
+            summary: format!(
+                "{} test{} in {suite} map to no feature",
+                ids.len(),
+                if ids.len() == 1 { "" } else { "s" }
+            ),
+            why_it_matters: "Tests that map to no feature cannot support any feature's health."
+                .into(),
+            evidence: ids
+                .iter()
+                .take(5)
+                .filter_map(|t| tests.get(t))
+                .map(|t| EvidenceRef::new(EvidenceKind::Test, t.test.id.as_str(), &t.test.name))
+                .collect(),
+            confidence: Confidence::High,
+            score: 0,
+            first_seen: now,
+            last_seen: now,
+            resolved_at: None,
+            commit: None,
+            payload: serde_json::json!({ "count": ids.len() }),
+        })
+        .collect();
+
     // Attention: feature reasons + project-level items, merged with persisted first_seen.
-    let attention =
-        crate::state::attention::collect(&feature_views, &warnings, &unresolved, store, now)?;
+    let mut extra_items = suite_reasons;
+    extra_items.extend(unlinked_items);
+    let attention = crate::state::attention::collect(
+        &feature_views,
+        &warnings,
+        &unresolved,
+        extra_items,
+        store,
+        now,
+    )?;
 
     // Counts, headline.
     let mut counts = StateCounts {
@@ -343,6 +564,24 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
         }
     }
     counts.attention_items = attention.len();
+    counts.tests = tests.len();
+    for t in tests.values() {
+        match t.latest.as_ref().map(|r| r.status) {
+            Some(TestStatus::Passed) => counts.tests_passed += 1,
+            Some(TestStatus::Failed) => counts.tests_failed += 1,
+            Some(TestStatus::Flaky) => counts.tests_flaky += 1,
+            Some(TestStatus::Skipped) => counts.tests_skipped += 1,
+            None => {}
+        }
+        if t.flaky && t.latest.as_ref().map(|r| r.status != TestStatus::Flaky).unwrap_or(false) {
+            counts.tests_flaky += 1;
+        }
+    }
+    counts.visuals = visuals.len();
+    counts.visual_regressions =
+        visuals.values().filter(|v| v.latest.status == VisualStatus::Regression).count();
+    counts.visual_stale =
+        visuals.values().filter(|v| v.latest.status == VisualStatus::Stale).count();
     let (overall, headline) = headline(&counts);
 
     // Persist derived rows.
@@ -375,13 +614,13 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
         events: store.events(500)?,
         unresolved,
         warnings,
-        suites: vec![],
-        tests: BTreeMap::new(),
+        suites: suite_views,
+        tests,
         benchmarks: BTreeMap::new(),
-        visuals: BTreeMap::new(),
-        environments: HashMap::new(),
-        artifacts: HashMap::new(),
-        sources: summarize_sources(input.located),
+        visuals,
+        environments: environments_raw.into_iter().map(|e| (e.id.clone(), e)).collect(),
+        artifacts: artifacts_raw.into_iter().map(|a| (a.id.clone(), a)).collect(),
+        sources: summarize_sources(input.located, store),
     })
 }
 
@@ -423,29 +662,77 @@ pub fn headline(c: &StateCounts) -> (HealthState, String) {
     (HealthState::Healthy, "Healthy".into())
 }
 
-pub fn summarize_sources(located: &Located) -> Vec<SourceSummary> {
+pub fn summarize_sources(located: &Located, store: &Store) -> Vec<SourceSummary> {
+    let runs = store.runs().unwrap_or_default();
+    let files = store.scan_files().unwrap_or_default();
     located
         .evidence_sources()
         .iter()
         .enumerate()
-        .map(|(i, s)| SourceSummary {
-            id: s.id.clone().unwrap_or_else(|| format!("auto:{}:{i}", s.format.as_str())),
-            title: s.title.clone(),
-            format: s.format.as_str().into(),
-            kind: s.default_kind().into(),
-            patterns: s.paths(),
-            component: s.component.clone(),
-            enabled: s.enabled,
-            files_matched: 0,
-            runs: 0,
-            last_seen: None,
-            github: s
-                .github
-                .as_ref()
-                .map(|g| format!("{} · {} · {}", g.repo, g.workflow, g.artifact)),
-            note: s.note.clone(),
+        .map(|(i, s)| {
+            let id = s.id.clone().unwrap_or_else(|| format!("auto:{}:{i}", s.format.as_str()));
+            let my_runs: Vec<&Run> = runs.iter().filter(|r| r.source.as_str() == id).collect();
+            SourceSummary {
+                files_matched: files
+                    .values()
+                    .filter(|f| f.source_id.as_deref() == Some(id.as_str()))
+                    .count(),
+                runs: my_runs.len(),
+                last_seen: my_runs.iter().map(|r| r.finished_at.value).max(),
+                id,
+                title: s.title.clone(),
+                format: s.format.as_str().into(),
+                kind: s.default_kind().into(),
+                patterns: s.paths(),
+                component: s.component.clone(),
+                enabled: s.enabled,
+                github: s
+                    .github
+                    .as_ref()
+                    .map(|g| format!("{} · {} · {}", g.repo, g.workflow, g.artifact)),
+                note: s.note.clone(),
+            }
         })
         .collect()
+}
+
+fn suite_silent_item(
+    su: &Suite,
+    silent_for: Option<jiff::SignedDuration>,
+    expect: jiff::SignedDuration,
+    now: Timestamp,
+) -> AttentionItem {
+    let summary = match silent_for {
+        Some(d) => format!(
+            "{} silent for {} (expected every {})",
+            su.id,
+            crate::time::span_compact(d),
+            crate::time::span_compact(expect)
+        ),
+        None => format!("{} has never published a run", su.id),
+    };
+    AttentionItem {
+        id: crate::ids::AttentionId::derive("suite_silent", None, su.id.as_str()),
+        reason: AttentionReason::SuiteSilent,
+        severity: if silent_for.is_some() { Severity::Medium } else { Severity::Low },
+        status: AttentionStatus::Open,
+        feature: None,
+        feature_title: None,
+        subject: su.id.0.clone(),
+        title: "Suite silent".into(),
+        summary,
+        why_it_matters:
+            "Evidence that stops arriving goes stale quietly; silence must be louder than green."
+                .into(),
+        evidence: vec![EvidenceRef::new(EvidenceKind::Suite, su.id.as_str(), &su.id.0)],
+        confidence: Confidence::High,
+        score: 0,
+        first_seen: now,
+        last_seen: now,
+        resolved_at: None,
+        commit: None,
+        payload: serde_json::json!({ "last_seen": su.last_seen.map(|t| t.to_string()) }),
+    }
 }
 
 #[allow(dead_code)]

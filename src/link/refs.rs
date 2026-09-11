@@ -175,6 +175,25 @@ pub fn flatten(id: &str) -> String {
     id.to_ascii_lowercase().replace(['.', '-'], "_")
 }
 
+/// Raw reference tokens (unresolved) as an importer sees them: `feat:x` tags, `__feat__x`
+/// suffixes (kept as `flat:x`), and bracketed ids with a separator (`[FEAT-019]`).
+pub fn raw_refs(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for c in TAG_RE.captures_iter(text) {
+        out.push(c[1].to_string());
+    }
+    for c in SUFFIX_RE.captures_iter(text) {
+        out.push(format!("flat:{}", &c[1]));
+    }
+    for c in BRACKET_RE.captures_iter(text) {
+        let raw = c[1].to_string();
+        if !raw.to_ascii_uppercase().starts_with("ADR") && raw.contains(['-', '.']) {
+            out.push(raw);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

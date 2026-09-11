@@ -55,7 +55,8 @@ async fn every_page_renders_full_and_partial() {
         ("/adrs/ADR-0001", "Affected features"),
         ("/status", "Import warnings"),
         ("/search?q=search", "Search"),
-        ("/tests", "Not in this build"),
+        ("/tests", "Tests"),
+        ("/performance", "Not in this build"),
     ];
     for (path, needle) in pages {
         let (status, body, _) = get(&app, path, false).await;

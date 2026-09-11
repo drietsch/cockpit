@@ -139,12 +139,28 @@ pub fn run(c: &Cockpit, limit: usize, fmt: &Format) -> anyhow::Result<i32> {
     );
     println!();
 
-    // Attention.
-    if st.attention.is_empty() {
-        println!("{}", fmt.dim("Nothing needs attention."));
+    // Attention (informational items are listed by `cockpit attention --all`).
+    let actionable: Vec<&crate::model::AttentionItem> = st
+        .attention
+        .iter()
+        .filter(|a| a.severity != crate::model::Severity::Informational)
+        .collect();
+    let info_count = st.attention.len() - actionable.len();
+    if actionable.is_empty() {
+        println!(
+            "{}",
+            fmt.dim(&format!(
+                "Nothing needs attention.{}",
+                if info_count > 0 {
+                    format!(" ({info_count} informational)")
+                } else {
+                    String::new()
+                }
+            ))
+        );
     } else {
         println!("{}", fmt.bold("Needs attention"));
-        for a in st.attention.iter().take(limit) {
+        for a in actionable.iter().take(limit) {
             let state = a
                 .feature
                 .as_ref()
@@ -194,7 +210,7 @@ pub fn run(c: &Cockpit, limit: usize, fmt: &Format) -> anyhow::Result<i32> {
     Ok(0)
 }
 
-fn truncate(s: &str, n: usize) -> String {
+pub fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()
     } else {

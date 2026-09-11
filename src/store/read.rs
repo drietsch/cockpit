@@ -20,6 +20,7 @@ pub struct ScanFileInfo {
     pub content_hash: String,
     pub importer: String,
     pub importer_version: u32,
+    pub source_id: Option<String>,
 }
 
 fn load_json<T: serde::de::DeserializeOwned>(store: &Store, sql: &str) -> Result<Vec<T>> {
@@ -39,7 +40,7 @@ fn load_json<T: serde::de::DeserializeOwned>(store: &Store, sql: &str) -> Result
 impl Store {
     pub fn scan_files(&self) -> Result<HashMap<RelPath, ScanFileInfo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT path, mtime_ms, size, content_hash, importer, importer_version FROM scan_files",
+            "SELECT path, mtime_ms, size, content_hash, importer, importer_version, source_id FROM scan_files",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -50,6 +51,7 @@ impl Store {
                     content_hash: r.get(3)?,
                     importer: r.get(4)?,
                     importer_version: r.get::<_, i64>(5)? as u32,
+                    source_id: r.get(6)?,
                 },
             ))
         })?;

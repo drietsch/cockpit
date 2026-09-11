@@ -535,7 +535,7 @@ pub struct PolicyClaims {
 }
 impl Default for PolicyClaims {
     fn default() -> Self {
-        PolicyClaims { drift: "warn".into() }
+        PolicyClaims { drift: "ignore".into() }
     }
 }
 

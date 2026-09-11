@@ -142,7 +142,8 @@ fn status_icon(state: String) -> Value {
             ("warn", "warn")
         }
         "broken" | "fail" | "failed" | "budget_breach" | "rejected" | "error" => ("x", "bad"),
-        "unknown" | "missing" | "incomparable" | "silent" | "skipped" => ("help", "unk"),
+        "unknown" | "incomparable" => ("help", "unk"),
+        "missing" | "silent" | "skipped" => ("minus", "mut"),
         "proposed" | "draft" => ("circle", "sec"),
         "superseded" | "deprecated" => ("minus", "mut"),
         _ => ("minus", "mut"),

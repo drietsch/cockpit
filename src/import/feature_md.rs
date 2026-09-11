@@ -341,6 +341,9 @@ pub(crate) mod tests {
             source: None,
             source_id: None,
             now: crate::time::parse_timestamp("2026-09-11T12:00:00Z").unwrap(),
+            cargo: &Default::default(),
+            sidecars: &Default::default(),
+            commits: &Default::default(),
         };
         FeatureMdImporter.import(&ctx, &input(rel, text))
     }

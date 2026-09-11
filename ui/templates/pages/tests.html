@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-h"><h1>Tests</h1><span class="muted">{{ table.counts.all | number }} total · {{ shell.counts.tests_passed | number }} passing · <span class="bad">{{ shell.counts.tests_failed }}</span> failing · <span class="warn">{{ table.counts.flaky }}</span> flaky</span></div>
+{% if table.suites %}
+<div class="suites">
+  {% for s in table.suites %}<a class="suite{% if table.filter.suite == s.id %} is-on{% endif %}{% if s.silent %} suite--silent{% endif %}" href="/tests?suite={{ s.id }}" title="{{ s.silent or '' }}"><span class="mono">{{ s.id }}</span> <span class="muted">{{ s.tests }} · {{ s.kind }}{% if s.last_seen %} · {{ s.last_seen | ago }}{% endif %}</span>{% if s.silent %} {{ m.glyph('stale', s.silent) }}{% endif %}</a>{% endfor %}
+</div>
+{% endif %}
+{% include "fragments/tests_table.html" %}
+{% endblock %}

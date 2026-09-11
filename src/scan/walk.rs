@@ -49,3 +49,29 @@ pub fn adr_files(located: &Located) -> Vec<PathBuf> {
     }
     out
 }
+
+/// Every `Cargo.toml` and `package.json` in the project (gitignore-aware), for the workspace
+/// indexes.
+pub fn manifests(located: &Located) -> Vec<RelPath> {
+    let mut out = Vec::new();
+    let mut builder = ignore::WalkBuilder::new(&located.root);
+    builder.hidden(true).git_ignore(true).git_global(false).follow_links(false).max_depth(Some(8));
+    builder.filter_entry(|e| {
+        let n = e.file_name().to_string_lossy();
+        n != "node_modules" && n != "target" && n != ".git" && n != "vendor"
+    });
+    for entry in builder.build().flatten() {
+        let p = entry.path();
+        if !p.is_file() {
+            continue;
+        }
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name == "Cargo.toml" || name == "package.json" {
+            if let Some(rel) = crate::paths::relativize(&located.root, p) {
+                out.push(rel);
+            }
+        }
+    }
+    out.sort();
+    out
+}

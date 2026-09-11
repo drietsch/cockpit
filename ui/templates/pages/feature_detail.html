@@ -26,6 +26,10 @@
       {% if feature.acceptance_criteria %}
       <section>{{ m.section('Acceptance criteria') }}<ol class="ac">{% for c in feature.acceptance_criteria %}<li>{% if c.checked is not none %}<span class="mono muted">[{% if c.checked %}x{% else %} {% endif %}]</span> {% endif %}{{ c.text }}</li>{% endfor %}</ol></section>
       {% endif %}
+      <section id="tests">{{ m.section('Tests', '/tests?feature=' ~ f.id, 'All ' ~ tests_total) }}
+        {% if tests %}<div class="table-wrap"><table class="ledger">{% for t in tests %}<tr class="row-{% if t.status == 'failed' %}broken{% elif t.status == 'flaky' %}attention{% endif %}" data-href="{{ url_for('test', t.id) }}"><td class="w-icon">{{ m.glyph(t.status, t.flaky_text) }}</td><td><a class="t" href="{{ url_for('test', t.id) }}">{{ t.name | truncate_chars(70) }}</a></td><td class="xs muted">{{ t.kind }}</td><td class="r mono">{% if t.duration_ms is not none %}{{ t.duration_ms | duration }}{% endif %}</td><td class="r mono muted nowrap">{{ m.ago(t.last_run) }}</td><td><ol class="runs">{% for r in t.strip %}<li class="run run--{{ r }}"></li>{% endfor %}</ol></td></tr>{% endfor %}</table></div>
+        {% else %}{{ m.empty('No tests linked', 'No test references ' ~ f.id ~ ' and none lives under its paths.', sources) }}{% endif %}
+      </section>
       <section>{{ m.section('Recent change', '/changes?feature=' ~ f.id, 'All changes') }}
         {% if commits %}<table class="ledger">{% for c in commits %}<tr data-href="{{ url_for('commit', c.sha, c.repo) }}"><td class="muted mono w-ago">{{ m.ago(c.at) }}</td><td class="mono w-sha">{% if shell.multi_repo %}<span class="repo-badge">{{ c.repo }}</span> {% endif %}{{ c.short }}</td><td><span class="t">{{ c.subject | truncate_chars(80) }}</span></td><td class="r muted xs">{{ c.note }}</td></tr>{% endfor %}</table>
         {% else %}{{ m.empty('No commits linked', 'No commit mentions ' ~ f.id ~ ' and none touched its paths.') }}{% endif %}

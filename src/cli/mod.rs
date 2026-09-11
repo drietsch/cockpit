@@ -1,7 +1,9 @@
 //! Command-line entry point. Exit codes: 0 ok · 1 policy/pull failure · 2 usage/config error ·
 //! 3 project not found · 4 index error.
 
+pub mod attention;
 pub mod doctor;
+pub mod feature;
 pub mod output;
 pub mod scan;
 pub mod serve;
@@ -86,6 +88,13 @@ pub enum Command {
     Attention {
         #[arg(long, default_value_t = 50)]
         limit: usize,
+        /// Include informational items (unverified claims, unlinked tests)
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        min_severity: Option<String>,
+        #[arg(long)]
+        feature: Option<String>,
     },
     /// Environment and project diagnostics
     Doctor,
@@ -193,12 +202,19 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
                 )
             }
         },
-        Command::Validate { .. }
-        | Command::Feature { .. }
-        | Command::Attention { .. }
-        | Command::Init { .. }
-        | Command::Pull { .. }
-        | Command::Query { .. } => {
+        Command::Feature { id } => {
+            let c = open_scanned(cli)?;
+            feature::run(&c, id, fmt)
+        }
+        Command::Attention { limit, all, min_severity, feature } => {
+            let c = open_scanned(cli)?;
+            attention::run(&c, *limit, *all, min_severity.as_deref(), feature.as_deref(), fmt)
+        }
+        Command::Validate { strict } => {
+            let c = open_scanned(cli)?;
+            crate::validate::run(&c, *strict, fmt)
+        }
+        Command::Init { .. } | Command::Pull { .. } | Command::Query { .. } => {
             fmt.error(
                 EXIT_USAGE,
                 "not_implemented",
@@ -207,6 +223,16 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
             Ok(EXIT_USAGE)
         }
     }
+}
+
+/// Open the project and scan it once if it never was.
+fn open_scanned(cli: &Cli) -> anyhow::Result<Cockpit> {
+    let cwd = std::env::current_dir()?;
+    let mut c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
+    if c.store.meta("last_scan_at")?.is_none() {
+        c.scan(None)?;
+    }
+    Ok(c)
 }
 
 fn classify(e: &anyhow::Error) -> (i32, &'static str) {

@@ -79,7 +79,7 @@ fn shell_ctx(app: &AppState) -> minijinja::Value {
         headline => st.headline.clone(),
         overall => st.overall.as_str(),
         counts => minijinja::Value::from_serialize(&st.counts),
-        attention_count => st.attention.len(),
+        attention_count => st.attention.iter().filter(|a| a.severity != crate::model::Severity::Informational).count(),
         warnings_count => st.warnings.len(),
         generation => st.generation,
         last_scan_at => st.last_scan_at.map(|t| t.to_string()),

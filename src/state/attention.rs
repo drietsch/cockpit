@@ -12,10 +12,11 @@ pub fn collect(
     features: &BTreeMap<FeatureId, FeatureView>,
     warnings: &[ImportWarning],
     unresolved: &[UnresolvedRef],
+    extra: Vec<AttentionItem>,
     store: &Store,
     now: Timestamp,
 ) -> crate::store::Result<Vec<AttentionItem>> {
-    let mut items: Vec<AttentionItem> = Vec::new();
+    let mut items: Vec<AttentionItem> = extra;
     for v in features.values() {
         for r in &v.health.reasons {
             let id = AttentionId::derive(r.reason.as_str(), Some(&v.feature.id), &r.subject);

@@ -152,6 +152,12 @@ impl Store {
         Ok(())
     }
 
+    pub fn forget_scan_file(&self, path: &RelPath) -> Result<()> {
+        self.conn.execute("DELETE FROM scan_files WHERE path = ?1", params![path.as_str()])?;
+        self.conn.execute("DELETE FROM warnings WHERE path = ?1", params![path.as_str()])?;
+        Ok(())
+    }
+
     pub fn replace_warnings(
         &self,
         path: &RelPath,
@@ -368,5 +374,64 @@ impl Store {
             ],
         )?;
         Ok(())
+    }
+}
+
+impl Store {
+    /// Persist a test batch. Suites and tests are upserted; the run and its children are
+    /// inserted only when the run identity is new. Returns whether the run was new.
+    pub fn persist_test_batch(
+        &self,
+        b: &crate::import::TestBatch,
+        identity: &str,
+        now: Timestamp,
+    ) -> Result<bool> {
+        let new_run = self.insert_run(&b.run, identity)?;
+        // Suite: keep the newest last_seen and count runs.
+        let mut suite = b.suite.clone();
+        if let Some(existing) = self.suites()?.into_iter().find(|s| s.id == suite.id) {
+            suite.run_count = existing.run_count + if new_run { 1 } else { 0 };
+            if let (Some(a), Some(e)) = (suite.last_seen, existing.last_seen) {
+                if e > a {
+                    suite.last_seen = Some(e);
+                    suite.last_run = existing.last_run.clone();
+                }
+            }
+        }
+        self.upsert_suite(&suite)?;
+        for t in &b.tests {
+            self.upsert_test(t)?;
+        }
+        for a in &b.artifacts {
+            self.upsert_artifact(a, now)?;
+        }
+        if new_run {
+            for tr in &b.test_runs {
+                self.insert_test_run(tr)?;
+            }
+            for v in &b.visuals {
+                self.insert_visual(v)?;
+            }
+        }
+        Ok(new_run)
+    }
+
+    pub fn persist_benchmark_batch(
+        &self,
+        b: &crate::import::BenchmarkBatch,
+        identity: &str,
+        now: Timestamp,
+    ) -> Result<bool> {
+        let new_run = self.insert_run(&b.run, identity)?;
+        self.upsert_environment(&b.environment, now)?;
+        for bm in &b.benchmarks {
+            self.upsert_benchmark(bm)?;
+        }
+        if new_run {
+            for br in &b.benchmark_runs {
+                self.insert_benchmark_run(br)?;
+            }
+        }
+        Ok(new_run)
     }
 }
