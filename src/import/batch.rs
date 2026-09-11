@@ -71,12 +71,17 @@ pub fn assemble(ctx: &ImportContext, spec: BatchSpec) -> (TestBatch, Vec<String>
             ctx.source,
         ),
     };
-    let suite_id =
-        SuiteId::new(if spec.suite_name.is_empty() || spec.suite_name == source_id.as_str() {
+    // A configured source is one suite, whatever the documents call themselves (a local
+    // nextest profile and CI may use different report names for the same tests). Convention
+    // sources keep the document's name so unrelated files stay apart.
+    let configured = !source_id.as_str().starts_with("auto:");
+    let suite_id = SuiteId::new(
+        if configured || spec.suite_name.is_empty() || spec.suite_name == source_id.as_str() {
             source_id.as_str().to_string()
         } else {
             format!("{}#{}", source_id, spec.suite_name)
-        });
+        },
+    );
     let mut declared = spec.declared;
     if declared.repo.is_none() {
         declared.repo = source_cfg.and_then(|s| s.repo.clone()).map(RepoId::new);
@@ -92,11 +97,16 @@ pub fn assemble(ctx: &ImportContext, spec: BatchSpec) -> (TestBatch, Vec<String>
         declared,
     );
     provenance.source = source_id.clone();
-    let identity = spec
-        .run_identity
-        .clone()
-        .or_else(|| provenance.run_id.clone())
-        .unwrap_or_else(|| spec.input.content_hash.hex());
+    // Run identity = suite + (declared run id | content hash): the same file under a
+    // differently shaped suite is a different run, so the old suite's tests stop being current.
+    let identity = format!(
+        "{}:{}",
+        suite_id,
+        spec.run_identity
+            .clone()
+            .or_else(|| provenance.run_id.clone().map(|r| format!("run:{r}")))
+            .unwrap_or_else(|| spec.input.content_hash.hex())
+    );
     let run_id = RunId::derive(&source_id, &identity);
 
     let component = source_cfg.and_then(|s| s.component.clone()).map(ComponentId::new);
@@ -248,6 +258,7 @@ pub fn assemble(ctx: &ImportContext, spec: BatchSpec) -> (TestBatch, Vec<String>
         counts,
         silent,
         silent_reason,
+        identity,
     };
     (TestBatch { suite, run, tests, test_runs, artifacts, visuals }, notes)
 }

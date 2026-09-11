@@ -642,6 +642,22 @@ impl Located {
     pub fn evidence_dir(&self) -> PathBuf {
         self.state_dir.parent().unwrap_or(&self.state_dir).join(&self.config.pull.dir)
     }
+
+    /// Evidence patterns are project-root-relative, except that `.cockpit/…` (the pull dir)
+    /// always means the `.cockpit` beside the config file — on an umbrella project that is
+    /// `<config dir>/.cockpit`, not `<root>/.cockpit`.
+    pub fn resolve_pattern(&self, pattern: &str) -> String {
+        let p = pattern.trim_start_matches("./");
+        if let Some(rest) = p.strip_prefix(".cockpit/") {
+            let dir = self.state_dir.parent().unwrap_or(&self.state_dir);
+            if let Some(rel) = crate::paths::relativize(&self.root, dir) {
+                if !rel.as_str().is_empty() {
+                    return format!("{}/.cockpit/{rest}", rel.as_str());
+                }
+            }
+        }
+        p.to_string()
+    }
 }
 
 fn dir_name(p: &Path) -> String {

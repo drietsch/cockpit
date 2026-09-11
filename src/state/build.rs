@@ -263,8 +263,34 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
 
     // Evidence: suites, tests, recent runs, visuals; per-test history; test → feature links.
     let suites = store.suites()?;
-    let tests_raw = store.tests()?;
+    let tests_all = store.tests()?;
     let recent_runs = store.recent_test_runs(cfg.health.flaky_window as usize)?;
+    // A test is current when its newest run is the newest run of the evidence file it came
+    // from, and that file still exists. Renamed or removed tests keep their history but leave
+    // the matrix; the same goes for a suite whose report name changed.
+    let all_runs = store.runs()?;
+    let present_files = store.scan_files()?;
+    let newest_for_path: HashMap<crate::paths::RelPath, RunId> = store.newest_run_per_path()?;
+    let run_path: HashMap<RunId, crate::paths::RelPath> =
+        all_runs.iter().map(|r| (r.id.clone(), r.provenance.source_path.clone())).collect();
+    let mut latest_run_of_test: HashMap<TestId, (Timestamp, RunId)> = HashMap::new();
+    for tr in &recent_runs {
+        let e = latest_run_of_test
+            .entry(tr.test.clone())
+            .or_insert((tr.timestamp.value, tr.run.clone()));
+        if tr.timestamp.value > e.0 {
+            *e = (tr.timestamp.value, tr.run.clone());
+        }
+    }
+    let is_current = |t: &Test| -> bool {
+        let Some((_, run)) = latest_run_of_test.get(&t.id) else { return false };
+        let Some(path) = run_path.get(run) else { return true };
+        if !present_files.contains_key(path) && !path.as_str().starts_with("external/") {
+            return false;
+        }
+        newest_for_path.get(path).map(|newest| newest == run).unwrap_or(true)
+    };
+    let tests_raw: Vec<Test> = tests_all.into_iter().filter(is_current).collect();
     let visuals_raw = store.recent_visuals()?;
     let artifacts_raw = store.artifacts()?;
     let environments_raw = store.environments()?;
@@ -571,7 +597,26 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
     }
 
     // Suite views: silence.
-    let mut suite_views: Vec<Suite> = suites.clone();
+    let suites_with_tests: HashSet<&SuiteId> = tests.values().map(|t| &t.test.suite).collect();
+    let mut suite_views: Vec<Suite> = suites
+        .iter()
+        .filter(|su| {
+            suites_with_tests.contains(&su.id)
+                || su
+                    .last_run
+                    .as_ref()
+                    .map(|r| {
+                        run_path
+                            .get(r)
+                            .map(|p| {
+                                present_files.contains_key(p) && newest_for_path.get(p) == Some(r)
+                            })
+                            .unwrap_or(true)
+                    })
+                    .unwrap_or(false)
+        })
+        .cloned()
+        .collect();
     suite_views.sort_by(|a, b| a.id.cmp(&b.id));
     let mut suite_reasons: Vec<AttentionItem> = Vec::new();
     for su in &suite_views {

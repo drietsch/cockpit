@@ -257,7 +257,7 @@ impl Importer for PlaywrightImporter {
         ImporterKind::Evidence(EvidenceFormat::Playwright)
     }
     fn version(&self) -> u32 {
-        1
+        3
     }
     fn import(&self, ctx: &ImportContext, input: &ImportInput) -> ImportOutput {
         let mut out = ImportOutput::default();

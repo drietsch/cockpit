@@ -184,3 +184,49 @@ fn flakiness_needs_history_and_silent_runs_never_count() {
     );
     assert!(st.suites[0].run_count >= 1);
 }
+
+#[test]
+fn tests_missing_from_the_latest_report_leave_the_matrix_but_keep_their_history() {
+    let p = base()
+        .config(&format!("{CONFIG}\n[[evidence]]\nid = \"app/nextest\"\nformat = \"junit\"\nkind = \"unit\"\npath = \"target/nextest/ci/junit.xml\"\n"))
+        .junit(
+        "target/nextest/ci/junit.xml",
+        "app-nextest",
+        &[
+            case("app", "search::index::tests::finds_things", "passed"),
+            case("app", "search::tests::old_name", "passed"),
+        ],
+        "2026-03-01T10:00:00Z",
+    );
+    let mut c = p.scan();
+    assert_eq!(c.state.load().tests.len(), 2);
+    // The suite is re-run; one test was renamed. The report name changed too (CI vs local
+    // profile), which must not split the suite.
+    p.put_junit(
+        "target/nextest/ci/junit.xml",
+        "app-ci",
+        &[
+            case("app", "search::index::tests::finds_things", "passed"),
+            case("app", "search::tests::new_name", "passed"),
+        ],
+        "2026-03-01T11:00:00Z",
+    );
+    c.scan(None).unwrap();
+    let st = c.state.load();
+    let names: Vec<&str> = st.tests.values().map(|t| t.test.name.as_str()).collect();
+    assert_eq!(st.tests.len(), 2, "{names:?}");
+    assert!(
+        names.iter().any(|n| n.ends_with("new_name"))
+            && !names.iter().any(|n| n.ends_with("old_name")),
+        "{names:?}"
+    );
+    assert_eq!(
+        st.suites.len(),
+        1,
+        "a configured source is one suite: {:?}",
+        st.suites.iter().map(|s| s.id.to_string()).collect::<Vec<_>>()
+    );
+    assert_eq!(st.suites[0].id.as_str(), "app/nextest");
+    assert_eq!(c.store.count("tests").unwrap(), 3, "history keeps the renamed test");
+    assert_eq!(c.store.count("runs").unwrap(), 2);
+}

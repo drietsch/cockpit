@@ -156,6 +156,20 @@ impl Store {
         load_json(self, "SELECT data_json FROM tests ORDER BY id")
     }
 
+    /// Newest run per evidence file (by completion time, then import order).
+    pub fn newest_run_per_path(&self) -> Result<HashMap<RelPath, RunId>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT source_path, id FROM (SELECT source_path, id, ROW_NUMBER() OVER (PARTITION BY source_path ORDER BY finished_at DESC, imported_at DESC, rowid DESC) AS rn FROM runs) WHERE rn = 1",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out = HashMap::new();
+        for row in rows {
+            let (p, id) = row?;
+            out.insert(RelPath::new(p), RunId::new(id));
+        }
+        Ok(out)
+    }
+
     pub fn runs(&self) -> Result<Vec<Run>> {
         load_json(self, "SELECT data_json FROM runs ORDER BY finished_at DESC")
     }

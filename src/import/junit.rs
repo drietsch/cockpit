@@ -26,11 +26,27 @@ impl Importer for JunitImporter {
         ImporterKind::Evidence(EvidenceFormat::Junit)
     }
     fn version(&self) -> u32 {
-        1
+        3
     }
     fn import(&self, ctx: &ImportContext, input: &ImportInput) -> ImportOutput {
         let mut out = ImportOutput::default();
-        let text = input.text();
+        let mut text = input.text();
+        // Some CI steps concatenate several reports into one file (`junit-all.xml`): strip
+        // the repeated declarations and wrap everything in one root.
+        if text.matches("<?xml").count() > 1 {
+            let mut joined = String::with_capacity(text.len() + 32);
+            for chunk in text.split("<?xml") {
+                if chunk.trim().is_empty() {
+                    continue;
+                }
+                let body = match chunk.find("?>") {
+                    Some(i) => &chunk[i + 2..],
+                    None => chunk,
+                };
+                joined.push_str(body);
+            }
+            text = format!("<testsuites name=\"combined\">{joined}</testsuites>").into();
+        }
         let doc = match roxmltree::Document::parse(&text) {
             Ok(d) => d,
             Err(e) => {
@@ -45,7 +61,7 @@ impl Importer for JunitImporter {
         };
         let root = doc.root_element();
         let suites: Vec<Node> = if root.has_tag_name("testsuites") {
-            root.children().filter(|n| n.has_tag_name("testsuite")).collect()
+            root.descendants().filter(|n| n.has_tag_name("testsuite")).collect()
         } else if root.has_tag_name("testsuite") {
             vec![root]
         } else {

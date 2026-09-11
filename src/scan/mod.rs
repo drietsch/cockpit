@@ -296,7 +296,7 @@ impl<'a> Scanner<'a> {
         for src in &sources {
             let mut slots = Vec::new();
             for pat in src.paths() {
-                let pat = pat.trim_start_matches("./").to_string();
+                let pat = self.located.resolve_pattern(&pat);
                 if pat.starts_with('/') {
                     slots.push(None);
                 } else {
@@ -496,6 +496,10 @@ impl<'a> Scanner<'a> {
         counts: &mut ScanCounts,
         now: Timestamp,
     ) -> Result<Option<Vec<ImportWarning>>> {
+        // Pull sidecars describe evidence; they are never evidence themselves.
+        if abs.file_name().map(|n| n == "provenance.json").unwrap_or(false) {
+            return Ok(None);
+        }
         let rel = relativize(&self.located.root, abs)
             .unwrap_or_else(|| RelPath::new(format!("external/{}", abs.display())));
         counts.files_seen += 1;
@@ -566,27 +570,13 @@ impl<'a> Scanner<'a> {
         for entity in &out.entities {
             match entity {
                 ImportedEntity::TestBatch(b) => {
-                    let identity = b
-                        .run
-                        .provenance
-                        .run_id
-                        .clone()
-                        .map(|r| format!("run:{r}"))
-                        .unwrap_or_else(|| content_hash.hex());
-                    let new = store.persist_test_batch(b, &identity, now)?;
+                    let new = store.persist_test_batch(b, &b.run.identity, now)?;
                     if new {
                         counts.runs += 1;
                     }
                 }
                 ImportedEntity::BenchmarkBatch(b) => {
-                    let identity = b
-                        .run
-                        .provenance
-                        .run_id
-                        .clone()
-                        .map(|r| format!("run:{r}"))
-                        .unwrap_or_else(|| content_hash.hex());
-                    store.persist_benchmark_batch(b, &identity, now)?;
+                    store.persist_benchmark_batch(b, &b.run.identity, now)?;
                 }
                 _ => {}
             }

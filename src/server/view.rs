@@ -9,6 +9,7 @@ pub fn register(env: &mut Environment<'static>) {
     env.add_filter("datetime", datetime);
     env.add_filter("short_sha", |s: String| s.chars().take(7).collect::<String>());
     env.add_filter("number", |n: f64| thousands(n as i64));
+    env.add_filter("bytes", |n: f64| bytes(n.max(0.0) as u64));
     env.add_filter("duration", duration);
     env.add_filter("pct", pct);
     env.add_filter("plural", |n: i64, one: String, many: String| if n == 1 { one } else { many });
@@ -47,6 +48,19 @@ fn datetime(v: Value, fmt: Option<String>) -> Result<String, Error> {
         _ => "%Y-%m-%d %H:%M",
     };
     Ok(z.strftime(f).to_string())
+}
+
+pub fn bytes(n: u64) -> String {
+    let f = n as f64;
+    if f >= 1024.0 * 1024.0 * 1024.0 {
+        format!("{:.1} GiB", f / (1024.0 * 1024.0 * 1024.0))
+    } else if f >= 1024.0 * 1024.0 {
+        format!("{:.1} MiB", f / (1024.0 * 1024.0))
+    } else if f >= 1024.0 {
+        format!("{:.0} KiB", f / 1024.0)
+    } else {
+        format!("{n} B")
+    }
 }
 
 pub fn thousands(n: i64) -> String {

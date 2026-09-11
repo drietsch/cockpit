@@ -220,6 +220,9 @@ pub struct Run {
     /// No usable results (all skipped, empty, or the inputs were missing) — never green, never red.
     pub silent: bool,
     pub silent_reason: Option<String>,
+    /// What makes this run unique within its source (suite + declared run id or content hash).
+    #[serde(default)]
+    pub identity: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

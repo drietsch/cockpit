@@ -5,6 +5,7 @@ pub mod attention;
 pub mod doctor;
 pub mod feature;
 pub mod output;
+pub mod pull;
 pub mod scan;
 pub mod serve;
 pub mod status;
@@ -110,12 +111,18 @@ pub enum Command {
     },
     /// Fetch the latest CI artifacts for configured evidence sources
     Pull {
+        /// Decide what would be fetched without downloading
         #[arg(long)]
         dry_run: bool,
+        /// Re-download even when the sidecar already records the newest run
         #[arg(long)]
         force: bool,
+        /// Only sources whose id matches (glob; repeatable)
         #[arg(long)]
         source: Vec<String>,
+        /// Exit 1 when any source was skipped
+        #[arg(long)]
+        strict: bool,
     },
     /// Structured query over project state
     Query { expr: String },
@@ -214,7 +221,16 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
             let c = open_scanned(cli)?;
             crate::validate::run(&c, *strict, fmt)
         }
-        Command::Init { .. } | Command::Pull { .. } | Command::Query { .. } => {
+        Command::Pull { dry_run, force, source, strict } => {
+            let mut c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
+            pull::run(
+                &mut c,
+                crate::pull::Options { dry_run: *dry_run, force: *force, only: source.clone() },
+                *strict,
+                fmt,
+            )
+        }
+        Command::Init { .. } | Command::Query { .. } => {
             fmt.error(
                 EXIT_USAGE,
                 "not_implemented",

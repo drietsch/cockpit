@@ -462,6 +462,7 @@ pub fn import_doc(
         counts: RunCounts { passed: n, ..Default::default() },
         silent: n == 0,
         silent_reason: if n == 0 { Some("no measurements".into()) } else { None },
+        identity,
     };
     out.entities.push(ImportedEntity::BenchmarkBatch(BenchmarkBatch {
         run,
