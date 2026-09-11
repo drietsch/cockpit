@@ -5,6 +5,7 @@ import { initRelTime } from './reltime.js';
 import { initKeynav } from './keynav.js';
 import { initPalette } from './palette.js';
 import { initCharts } from './charts.js';
+import { initCompare } from './compare.js';
 
 function configureHtmx() {
   if (!window.htmx) { setTimeout(configureHtmx, 20); return; }
@@ -93,6 +94,7 @@ initRelTime();
 initKeynav();
 initPalette();
 initCharts();
+initCompare();
 initLive();
 initRowLinks();
 initCopy();

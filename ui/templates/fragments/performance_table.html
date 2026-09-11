@@ -1,5 +1,5 @@
 {% import "components/macros.html" as m %}
-<div id="perf-table" hx-get="/fragments/performance/table{{ table.query }}" hx-trigger="cockpit:refresh from:body" hx-swap="morph:outerHTML" hx-target="this" hx-disinherit="hx-target hx-swap hx-trigger hx-get" data-live="performance">
+<div id="perf-table" hx-get="/fragments/performance/table{{ table.query }}" hx-trigger="cockpit:refresh from:body" hx-swap="morph:outerHTML" hx-target="this" data-live="performance">
 <form class="filters" method="get" action="/performance" hx-get="/fragments/performance/table" hx-target="#perf-table" hx-swap="morph:outerHTML" hx-trigger="change, submit, input changed delay:250ms from:[name=q]">
   <div class="chips" role="group" aria-label="State">
     {% for s in [['all', 'All', table.counts.all], ['breach', 'Over budget', table.counts.breach], ['regression', 'Regressions', table.counts.regression + table.counts.reported], ['incomparable', 'Incomparable', table.counts.incomparable], ['stable', 'Stable', table.counts.stable], ['improved', 'Improved', table.counts.improved], ['unknown', 'First run', table.counts.unknown]] %}
@@ -14,7 +14,7 @@
   <noscript><button class="btn">Apply</button></noscript>
 </form>
 {% if table.rows %}
-<div class="table-wrap">
+<div class="table-wrap" hx-target="#main" hx-swap="outerHTML show:window:top">
 <table class="ledger perf" data-keynav>
   <thead><tr><th class="w-icon"></th><th>Metric</th><th>Feature</th><th class="r">Value</th><th class="r">Change</th><th class="r">Budget</th><th>Environment</th><th>Class</th><th>State</th><th class="r">Last run</th><th>Trend</th></tr></thead>
   <tbody>
@@ -36,7 +36,7 @@
   </tbody>
 </table>
 </div>
-{% if table.total > table.shown %}<div class="table-foot"><a href="/performance{{ table.query }}{% if table.query %}&{% else %}?{% endif %}limit=100000">Show all {{ table.total }}</a></div>{% endif %}
+{% if table.total > table.shown %}<div class="table-foot" hx-target="#main" hx-swap="outerHTML show:window:top"><a href="/performance{{ table.query }}{% if table.query %}&{% else %}?{% endif %}limit=100000">Show all {{ table.total }}</a></div>{% endif %}
 {% else %}
 {{ m.empty('No benchmark evidence', 'No benchmark documents matched the configured sources. Cockpit reads cockpit.benchmark.v1 documents, Guardian bench results, Criterion output and paged measurements.', table.sources) }}
 {% endif %}

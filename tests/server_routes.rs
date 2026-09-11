@@ -57,7 +57,7 @@ async fn every_page_renders_full_and_partial() {
         ("/search?q=search", "Search"),
         ("/tests", "Tests"),
         ("/performance", "No benchmark evidence"),
-        ("/visual", "Not in this build"),
+        ("/visual", "No visual evidence"),
     ];
     for (path, needle) in pages {
         let (status, body, _) = get(&app, path, false).await;

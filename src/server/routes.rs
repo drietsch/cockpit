@@ -27,7 +27,6 @@ pub fn router() -> Router<AppState> {
         .route("/tests", get(tests))
         .route("/tests/{id}", get(test_detail))
         .route("/fragments/tests/table", get(tests_table_fragment))
-        .route("/visual", get(coming_soon))
 }
 
 pub async fn not_found(hx: Hx, State(app): State<AppState>) -> Result<Page, AppError> {
@@ -41,22 +40,6 @@ pub async fn not_found(hx: Hx, State(app): State<AppState>) -> Result<Page, AppE
     )?;
     p.status = axum::http::StatusCode::NOT_FOUND;
     Ok(p)
-}
-
-async fn coming_soon(
-    hx: Hx,
-    State(app): State<AppState>,
-    uri: axum::http::Uri,
-) -> Result<Page, AppError> {
-    let nav = uri.path().trim_start_matches('/').to_string();
-    render(
-        &app,
-        &hx,
-        "pages/coming_soon.html",
-        "Coming soon",
-        &nav,
-        context! { section => nav.clone() },
-    )
 }
 
 // ── Overview ────────────────────────────────────────────────────────────────

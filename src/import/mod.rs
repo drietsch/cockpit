@@ -15,6 +15,7 @@ pub mod playwright;
 pub mod provenance;
 pub mod results_json;
 pub mod sniff;
+pub mod visual;
 
 use crate::config::{EvidenceFormat, EvidenceSource, Located};
 use crate::hash::ContentHash;
@@ -214,6 +215,12 @@ pub fn importer_for(kind: ImporterKind) -> Option<Box<dyn Importer>> {
         }
         ImporterKind::Evidence(EvidenceFormat::Criterion) => {
             Some(Box::new(criterion::CriterionImporter))
+        }
+        ImporterKind::Evidence(EvidenceFormat::Fidelity) => {
+            Some(Box::new(visual::FidelityImporter))
+        }
+        ImporterKind::Evidence(EvidenceFormat::CockpitVisual) => {
+            Some(Box::new(visual::CockpitVisualImporter))
         }
         ImporterKind::Evidence(_) => None,
     }

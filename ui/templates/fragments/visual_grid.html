@@ -1,0 +1,37 @@
+{% import "components/macros.html" as m %}
+<div id="visual-grid" hx-get="/fragments/visual/grid{{ grid.query }}" hx-trigger="cockpit:refresh from:body" hx-swap="morph:outerHTML" hx-target="this" data-live="visual">
+<form class="filters" method="get" action="/visual" hx-get="/fragments/visual/grid" hx-target="#visual-grid" hx-swap="morph:outerHTML" hx-trigger="change, submit, input changed delay:250ms from:[name=q]">
+  <div class="chips" role="group" aria-label="Status">
+    {% for s in [['all', 'All', grid.counts.all], ['regression', 'Regressions', grid.counts.regression], ['missing', 'No baseline', grid.counts.missing], ['stale', 'Stale', grid.counts.stale], ['current', 'Current', grid.counts.current], ['inconclusive', 'Inconclusive', grid.counts.inconclusive]] %}
+    <label class="chip-toggle{% if (grid.filter.status or 'all') == s[0] %} is-on{% endif %}"><input type="radio" name="status" value="{{ s[0] }}"{% if (grid.filter.status or 'all') == s[0] %} checked{% endif %}>{{ s[1] }} <span class="mono muted">{{ s[2] }}</span></label>
+    {% endfor %}
+  </div>
+  {% if grid.filter.suite %}<input type="hidden" name="suite" value="{{ grid.filter.suite }}">{% endif %}
+  {% if grid.filter.feature %}<input type="hidden" name="feature" value="{{ grid.filter.feature }}">{% endif %}
+  <select name="group" aria-label="Group by">{% for g in [['suite', 'Group: test'], ['feature', 'Group: feature'], ['page', 'Group: page'], ['browser', 'Group: browser'], ['viewport', 'Group: viewport'], ['status', 'Group: status'], ['none', 'No grouping']] %}<option value="{{ g[0] }}"{% if grid.filter.group == g[0] %} selected{% endif %}>{{ g[1] }}</option>{% endfor %}</select>
+  {% if grid.browsers | length > 1 %}<select name="browser" aria-label="Browser"><option value="">Any browser</option>{% for b in grid.browsers %}<option value="{{ b }}"{% if grid.filter.browser == b %} selected{% endif %}>{{ b }}</option>{% endfor %}</select>{% endif %}
+  <input type="search" name="q" value="{{ grid.filter.q or '' }}" placeholder="Filter…" aria-label="Filter checks" data-page-filter>
+  <noscript><button class="btn">Apply</button></noscript>
+</form>
+{% if grid.groups %}
+{% for g in grid.groups %}
+<section class="vgroup">
+  {% if g.key %}<div class="section__h"><h2>{{ g.key }} <span class="mono muted">{{ g.count }}</span></h2></div>{% endif %}
+  <div class="vgrid" hx-target="#main" hx-swap="outerHTML show:window:top">
+    {% for v in g.items %}
+    <a class="vcard vcard--{{ v.status }}" href="{{ url_for('visual', v.id) }}" data-id="{{ v.id }}">
+      <div class="vcard__thumb">{% if v.thumb %}<img src="{{ v.thumb }}" alt="" loading="lazy" decoding="async">{% else %}<div class="vcard__none muted xs">no image</div>{% endif %}</div>
+      <div class="vcard__body">
+        <div class="vcard__name">{{ m.glyph(v.status) }} <span class="t">{{ v.name | truncate_chars(48) }}</span></div>
+        <div class="xs muted">{% if v.metric_text %}{{ v.metric_text }} · {% endif %}{% if v.browser %}{{ v.browser }}{% if v.viewport %} {{ v.viewport }}{% endif %} · {% endif %}{{ m.ago(v.at) }}</div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+{% if grid.total > grid.shown %}<div class="table-foot" hx-target="#main" hx-swap="outerHTML show:window:top"><a href="/visual{{ grid.query }}{% if grid.query %}&{% else %}?{% endif %}limit=100000">Show all {{ grid.total }}</a></div>{% endif %}
+{% else %}
+{{ m.empty('No visual evidence', 'No screenshot comparisons or fidelity reports matched the configured sources. Playwright snapshot triples, fidelity-diff gate directories and cockpit.visual.v1 documents are read.', grid.sources) }}
+{% endif %}
+</div>

@@ -1,5 +1,5 @@
 {% import "components/macros.html" as m %}
-<div class="table-wrap">
+<div class="table-wrap" hx-target="#main" hx-swap="outerHTML show:window:top">
 <table class="ledger matrix" data-keynav>
   <thead><tr>
     <th class="w-icon"></th><th>Feature</th><th>State</th><th class="c">Unit</th><th class="c">Int</th><th class="c">E2E</th><th class="c">Visual</th><th class="c">Perf</th><th class="r">ADR</th><th class="r">Changed</th>

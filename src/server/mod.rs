@@ -2,6 +2,7 @@
 //! MiniJinja templates. HTMX gives SPA-like navigation; SSE pushes live updates.
 
 pub mod api;
+pub mod artifacts;
 pub mod assets;
 pub mod hx;
 pub mod markdown;
@@ -10,6 +11,7 @@ pub mod routes;
 pub mod sse;
 pub mod templates;
 pub mod view;
+pub mod visual;
 
 use crate::cockpit::Cockpit;
 use crate::state::StateHandle;
@@ -50,6 +52,7 @@ pub struct AppState {
     pub evidence_dir: PathBuf,
     pub scan_requests: tokio::sync::mpsc::Sender<()>,
     pub multi_repo: bool,
+    pub artifact_roots: artifacts::ArtifactRoots,
 }
 
 impl AppState {
@@ -63,9 +66,11 @@ pub fn build_router(app: AppState) -> Router {
     Router::new()
         .merge(routes::router())
         .merge(perf::router())
+        .merge(visual::router())
         .nest("/api/v1", api::router())
         .route("/events", axum::routing::get(sse::events))
         .route("/assets/{*path}", axum::routing::get(assets::serve))
+        .route("/artifacts/{root}/{*path}", axum::routing::get(artifacts::serve))
         .route("/healthz", axum::routing::get(|| async { "ok" }))
         .fallback(routes::not_found)
         .layer(middleware::from_fn(security_headers))
@@ -108,6 +113,10 @@ pub fn serve_blocking(c: &mut Cockpit, opts: ServeOptions) -> anyhow::Result<()>
         evidence_dir: c.located.evidence_dir(),
         scan_requests: scan_tx,
         multi_repo: c.located.config.repos.len() > 1 || !c.located.root.join(".git").exists(),
+        artifact_roots: artifacts::ArtifactRoots::from_located(
+            &c.located,
+            &c.store.repos().unwrap_or_default(),
+        ),
     };
 
     // Rescan worker: owns the Cockpit for the lifetime of the server.
@@ -217,6 +226,10 @@ impl AppState {
             scan_requests: scan_tx,
             multi_repo: cockpit.located.config.repos.len() > 1
                 || !cockpit.located.root.join(".git").exists(),
+            artifact_roots: artifacts::ArtifactRoots::from_located(
+                &cockpit.located,
+                &cockpit.store.repos().unwrap_or_default(),
+            ),
         })
     }
 }

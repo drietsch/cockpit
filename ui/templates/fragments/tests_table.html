@@ -1,5 +1,5 @@
 {% import "components/macros.html" as m %}
-<div id="tests-table" hx-get="/fragments/tests/table{{ table.query }}" hx-trigger="cockpit:refresh from:body" hx-swap="morph:outerHTML" hx-target="this" hx-disinherit="hx-target hx-swap hx-trigger hx-get" data-live="tests">
+<div id="tests-table" hx-get="/fragments/tests/table{{ table.query }}" hx-trigger="cockpit:refresh from:body" hx-swap="morph:outerHTML" hx-target="this" data-live="tests">
 <form class="filters" method="get" action="/tests" hx-get="/fragments/tests/table" hx-target="#tests-table" hx-swap="morph:outerHTML" hx-trigger="change, submit, input changed delay:250ms from:[name=q]">
   <div class="chips" role="group" aria-label="Status">
     {% for s in [['all', 'All', table.counts.all], ['failing', 'Failing', table.counts.failing], ['flaky', 'Flaky', table.counts.flaky], ['slow', 'Slow', none], ['recent', 'Recent', none], ['unlinked', 'Unlinked', table.counts.unlinked]] %}
@@ -14,7 +14,7 @@
   <noscript><button class="btn">Apply</button></noscript>
 </form>
 {% if table.rows %}
-<div class="table-wrap">
+<div class="table-wrap" hx-target="#main" hx-swap="outerHTML show:window:top">
 <table class="ledger" data-keynav>
   <thead><tr><th class="w-icon"></th><th>Test</th><th>Feature</th><th>Kind</th><th>Suite</th><th class="r">Duration</th><th class="r">Last run</th><th>Runs</th></tr></thead>
   <tbody>
@@ -33,7 +33,7 @@
   </tbody>
 </table>
 </div>
-{% if table.total > table.shown %}<div class="table-foot"><a href="/tests{{ table.query }}{% if table.query %}&{% else %}?{% endif %}limit=100000">Show all {{ table.total }}</a></div>{% endif %}
+{% if table.total > table.shown %}<div class="table-foot" hx-target="#main" hx-swap="outerHTML show:window:top"><a href="/tests{{ table.query }}{% if table.query %}&{% else %}?{% endif %}limit=100000">Show all {{ table.total }}</a></div>{% endif %}
 {% else %}
 {{ m.empty('No test evidence', 'No test results matched the configured sources.', table.sources) }}
 {% endif %}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-h"><h1>Visual</h1><span class="muted">{{ grid.counts.all }} checks · {% if grid.counts.regression %}<span class="bad">{{ grid.counts.regression }} regression{{ grid.counts.regression | plural('', 's') }}</span> · {% endif %}{% if grid.counts.missing %}{{ grid.counts.missing }} without baseline · {% endif %}{% if grid.counts.stale %}<span class="warn">{{ grid.counts.stale }} stale</span> · {% endif %}{{ grid.counts.current }} current{% if grid.counts.inconclusive %} · {{ grid.counts.inconclusive }} inconclusive{% endif %}{% if grid.counts.skipped %} · {{ grid.counts.skipped }} skipped{% endif %}</span></div>
+{% if grid.suites | length > 1 %}
+<div class="suites">
+  {% for s in grid.suites %}<a class="suite{% if grid.filter.suite == s.id %} is-on{% endif %}" href="/visual?suite={{ s.id }}"><span class="mono">{{ s.id }}</span> <span class="muted">{{ s.count }}</span>{% if s.regressions %} <span class="bad">{{ s.regressions }}</span>{% endif %}</a>{% endfor %}
+</div>
+{% endif %}
+{% include "fragments/visual_grid.html" %}
+{% endblock %}

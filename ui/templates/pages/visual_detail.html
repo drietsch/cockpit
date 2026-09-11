@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block main %}
+<article class="detail">
+  <header class="detail__h row-{% if v.status == 'regression' %}broken{% elif v.status == 'stale' or v.status == 'missing' %}attention{% endif %}">
+    <div class="detail__title"><h1>{% if v.test_name %}<a class="muted" href="{{ url_for('test', v.test_id) }}">{{ v.test_name | truncate_chars(60) }}</a> · {% endif %}{{ v.name }}</h1>{{ m.idchip(v.id) }}</div>
+    <div class="detail__state">{{ m.status(v.status) }}{% if v.metric_text %}<span class="detail__headline">{{ v.metric_text }}</span>{% endif %}{% if total > 1 %}<span class="pager">{% if prev %}<a href="{{ url_for('visual', prev) }}?mode={{ mode }}" aria-label="previous">←</a>{% endif %} <span class="muted xs">{{ position }} / {{ total }}</span> {% if next %}<a href="{{ url_for('visual', next) }}?mode={{ mode }}" aria-label="next">→</a>{% endif %}</span>{% endif %}</div>
+    <dl class="kv kv--inline">
+      {% if v.features %}<dt>Feature</dt><dd>{% for f in v.features %}{{ m.feature_ref(f.id, f.title, f.state) }} {% endfor %}</dd>{% endif %}
+      {% if v.suite %}<dt>Suite</dt><dd class="mono">{{ v.suite }}</dd>{% endif %}
+      {% if v.page %}<dt>Page</dt><dd>{{ v.page }}</dd>{% endif %}
+      {% if v.browser %}<dt>Browser</dt><dd>{{ v.browser }}{% if v.viewport %} · {{ v.viewport }}{% endif %}</dd>{% endif %}
+      {% if v.commit %}<dt>Commit</dt><dd>{{ m.commit_ref(v.commit.repo, v.commit.sha, none, shell.multi_repo) }} <span class="muted xs">{{ v.commit.origin | replace('_', ' ') }}</span></dd>{% endif %}
+      <dt>Captured</dt><dd>{{ m.ago(v.at) }}</dd>
+      {% if previous %}<dt>Previous</dt><dd>{{ m.status(previous.status) }} <span class="muted xs">{{ m.ago(previous.at) }}</span></dd>{% endif %}
+    </dl>
+  </header>
+
+  {% if v.metrics and (v.metrics.difference_ratio is not none or v.metrics.mean_de is not none or v.metrics.changed_pixels is not none) %}
+  <table class="metrics metrics--row" aria-label="Difference metrics"><tr>
+    {% if v.metrics.difference_ratio is not none %}<td>Difference</td><td class="mono">{{ (v.metrics.difference_ratio * 100) | round(3) }}%</td>{% endif %}
+    {% if v.metrics.changed_pixels is not none %}<td>Changed pixels</td><td class="mono">{{ v.metrics.changed_pixels | number }}</td>{% endif %}
+    {% if v.metrics.mean_de is not none %}<td>Mean ΔE</td><td class="mono">{{ v.metrics.mean_de | round(3) }}</td>{% endif %}
+    {% if v.metrics.p99_de is not none %}<td>p99 ΔE</td><td class="mono">{{ v.metrics.p99_de | round(2) }}</td>{% endif %}
+    {% if v.metrics.max_de is not none %}<td>Max ΔE</td><td class="mono">{{ v.metrics.max_de | round(2) }}</td>{% endif %}
+    {% if v.metrics.ssim is not none %}<td>SSIM</td><td class="mono">{{ v.metrics.ssim | round(4) }}</td>{% endif %}
+    {% if thresholds %}<td>Thresholds</td><td class="mono xs muted">{% for t in thresholds %}{{ t.key }} {{ t.value }}{% if not loop.last %} · {% endif %}{% endfor %}</td>{% endif %}
+  </tr></table>
+  {% endif %}
+
+  {% if v.has_images %}
+  <div class="viewer" data-viewer data-mode="{{ mode }}" data-expected="{{ v.baseline_url or '' }}" data-actual="{{ v.actual_url or '' }}" data-diff="{{ v.diff_url or '' }}">
+    <div class="viewer__bar" role="toolbar" aria-label="Compare modes">
+      <div class="chips">
+        {% for md in [['expected', 'Expected', '1'], ['actual', 'Actual', '2'], ['diff', v.diff_role == 'heat' and 'Heat map' or 'Diff', '3'], ['side', 'Side by side', 's'], ['overlay', 'Overlay', 'o'], ['blink', 'Blink', 'b']] %}
+        <button type="button" class="chip-toggle{% if mode == md[0] %} is-on{% endif %}" data-mode-btn="{{ md[0] }}"{% if (md[0] == 'expected' and not v.baseline_url) or (md[0] == 'actual' and not v.actual_url) or (md[0] == 'diff' and not v.diff_url) or ((md[0] == 'side' or md[0] == 'overlay' or md[0] == 'blink') and not (v.baseline_url and v.actual_url)) %} disabled{% endif %}>{{ md[1] }} <kbd>{{ md[2] }}</kbd></button>
+        {% endfor %}
+      </div>
+      <div class="viewer__zoom">
+        <button type="button" class="btn btn--sm" data-zoom="fit">Fit <kbd>f</kbd></button>
+        <button type="button" class="btn btn--sm" data-zoom="100">100% <kbd>0</kbd></button>
+        <button type="button" class="btn btn--sm" data-zoom="out" aria-label="zoom out">−</button>
+        <span class="mono xs" data-zoom-label>fit</span>
+        <button type="button" class="btn btn--sm" data-zoom="in" aria-label="zoom in">+</button>
+        <label class="viewer__opacity" data-overlay-only><span class="xs muted">opacity</span><input type="range" min="0" max="100" value="50" data-opacity aria-label="overlay opacity"></label>
+      </div>
+    </div>
+    <div class="viewer__stage" data-stage tabindex="0" aria-label="image comparison">
+      <div class="viewer__pane" data-pane="a"><img alt="expected" data-img="expected"></div>
+      <div class="viewer__pane" data-pane="b"><img alt="actual" data-img="actual"></div>
+      <div class="viewer__swipe" data-swipe hidden></div>
+    </div>
+    <noscript><div class="viewer__static">{% if v.baseline_url %}<figure><figcaption>Expected</figcaption><img src="{{ v.baseline_url }}" alt="expected"></figure>{% endif %}{% if v.actual_url %}<figure><figcaption>Actual</figcaption><img src="{{ v.actual_url }}" alt="actual"></figure>{% endif %}{% if v.diff_url %}<figure><figcaption>Diff</figcaption><img src="{{ v.diff_url }}" alt="diff"></figure>{% endif %}</div></noscript>
+  </div>
+  {% else %}
+  <div class="empty">No image files are available for this check{% if v.status == 'missing' %} — no baseline was recorded{% endif %}. Artifacts are read from the project tree and the evidence cache; pulled artifacts appear after <span class="mono">cockpit pull</span>.</div>
+  {% endif %}
+
+  {% if run and run.message %}<section>{{ m.section('Failure') }}<div class="sec">{{ run.message }}</div>{% if run.details %}<pre class="output">{{ run.details }}</pre>{% endif %}</section>{% endif %}
+  <section class="muted xs">Check id <span class="mono">{{ v.id }}</span>{% if v.baseline_url %} · <a href="{{ v.baseline_url }}" hx-boost="false">expected</a>{% endif %}{% if v.actual_url %} · <a href="{{ v.actual_url }}" hx-boost="false">actual</a>{% endif %}{% if v.diff_url %} · <a href="{{ v.diff_url }}" hx-boost="false">diff</a>{% endif %}</section>
+</article>
+{% endblock %}
