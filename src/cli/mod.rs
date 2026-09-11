@@ -179,10 +179,7 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
             scan::run(&mut c, *full, *reset_history, fmt)
         }
         Command::Status { limit } => {
-            let mut c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
-            if c.store.meta("last_scan_at")?.is_none() {
-                c.scan(None)?;
-            }
+            let c = open_scanned(cli)?;
             status::run(&c, *limit, fmt)
         }
         Command::Doctor => {
@@ -262,13 +259,12 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
     }
 }
 
-/// Open the project and scan it once if it never was.
+/// Open the project and bring the index up to date (an incremental scan is cheap; a stale
+/// answer from a gate is not).
 fn open_scanned(cli: &Cli) -> anyhow::Result<Cockpit> {
     let cwd = std::env::current_dir()?;
     let mut c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
-    if c.store.meta("last_scan_at")?.is_none() {
-        c.scan(None)?;
-    }
+    c.scan(None)?;
     Ok(c)
 }
 
