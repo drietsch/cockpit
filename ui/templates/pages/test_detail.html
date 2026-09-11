@@ -37,7 +37,14 @@
     <div>
       {% if artifacts %}
       <section>{{ m.section('Artifacts') }}
-        <ul class="list">{% for a in artifacts %}<li><a href="{{ a.url }}"{% if a.kind == 'trace' or a.kind == 'video' %} hx-boost="false"{% endif %}>{{ a.name }}</a> <span class="muted xs">{{ a.kind }}{% if a.role != 'plain' %} · {{ a.role }}{% endif %}{% if not a.exists %} · missing{% endif %}</span></li>{% endfor %}</ul>
+        {% for a in artifacts %}{% if a.kind == 'video' and a.exists %}<video class="artifact-video" controls preload="metadata" src="{{ a.url }}"></video>{% endif %}{% endfor %}
+        <div class="thumbs">{% for a in artifacts %}{% if (a.kind == 'screenshot' or a.kind == 'image') and a.exists %}<a class="thumb" href="{{ a.url }}" hx-boost="false" target="_blank" rel="noopener"><img src="{{ a.url }}" alt="{{ a.name }}" loading="lazy"><span class="xs muted">{{ a.name | truncate_chars(28) }}{% if a.role != 'plain' %} · {{ a.role }}{% endif %}</span></a>{% endif %}{% endfor %}</div>
+        <ul class="list">{% for a in artifacts %}<li><a href="{{ a.url }}"{% if a.kind == 'trace' or a.kind == 'video' %} hx-boost="false"{% endif %}>{{ a.name }}</a> <span class="muted xs">{{ a.kind }}{% if a.role != 'plain' %} · {{ a.role }}{% endif %}{% if not a.exists %} · missing{% endif %}</span>{% if a.kind == 'trace' %} <button type="button" class="btn btn--sm" data-copy="npx playwright show-trace {{ a.file or a.name }}" title="copy the command that opens this trace">copy show-trace</button>{% endif %}</li>{% endfor %}</ul>
+      </section>
+      {% endif %}
+      {% if visuals %}
+      <section>{{ m.section('Visual checks') }}
+        <div class="vgrid">{% for v in visuals %}<a class="vcard vcard--{{ v.status }}" href="{{ url_for('visual', v.id) }}"><div class="vcard__thumb">{% if v.thumb %}<img src="{{ v.thumb }}" alt="" loading="lazy">{% endif %}</div><div class="vcard__body"><div class="vcard__name">{{ m.glyph(v.status) }} <span class="t">{{ v.name | truncate_chars(40) }}</span></div></div></a>{% endfor %}</div>
       </section>
       {% endif %}
       {% if suite %}

@@ -10,11 +10,13 @@
   {% if table.groups %}<select name="group" aria-label="Group"><option value="">Any group</option>{% for g in table.groups %}<option value="{{ g }}"{% if table.filter.group == g %} selected{% endif %}>{{ g }}</option>{% endfor %}</select>{% endif %}
   {% if table.owners %}<select name="owner" aria-label="Owner"><option value="">Any owner</option>{% for o in table.owners %}<option value="{{ o }}"{% if table.filter.owner == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select>{% endif %}
   <select name="sort" aria-label="Sort"><option value="rank"{% if table.filter.sort == 'rank' %} selected{% endif %}>Sort: attention</option><option value="changed"{% if table.filter.sort == 'changed' %} selected{% endif %}>Sort: recently changed</option><option value="importance"{% if table.filter.sort == 'importance' %} selected{% endif %}>Sort: importance</option><option value="name"{% if table.filter.sort == 'name' %} selected{% endif %}>Sort: name</option><option value="id"{% if table.filter.sort == 'id' %} selected{% endif %}>Sort: id</option></select>
+  {% if table.has_claims %}<label class="chip-toggle{% if table.show_claims %} is-on{% endif %}"><input type="checkbox" name="cols" value="claims"{% if table.show_claims %} checked{% endif %}>Claims</label>{% endif %}
   <input type="search" name="q" value="{{ table.filter.q or '' }}" placeholder="Filter…" aria-label="Filter features" data-page-filter>
   <noscript><button class="btn">Apply</button></noscript>
 </form>
 {% if table.rows %}
 {% set matrix = table.rows %}
+{% set show_claims = table.show_claims %}
 {% include "fragments/_matrix_rows.html" %}
 {% if table.total > table.shown %}<div class="table-foot" hx-target="#main" hx-swap="outerHTML show:window:top"><a href="/features{{ table.query }}{% if table.query %}&{% else %}?{% endif %}limit=100000">Show all {{ table.total }}</a></div>{% endif %}
 {% else %}

@@ -322,7 +322,25 @@ pub fn feature_row(_st: &ProjectState, v: &FeatureView) -> Value {
         reasons => v.health.reasons.len(),
         confidence => v.health.confidence.as_str(),
         claims => f.claims.iter().map(|c| context! { component => c.component.as_str(), status => c.status.as_str(), note => c.note.clone() }).collect::<Vec<_>>(),
+        claims_summary => claims_summary(v),
     }
+}
+
+/// `● 3 · ◐ 1 · ○ 2` plus a drift marker when a shipped claim has no evidence on its component.
+fn claims_summary(v: &FeatureView) -> Option<Value> {
+    if v.feature.claims.is_empty() {
+        return None;
+    }
+    let count = |s: ClaimStatus| v.feature.claims.iter().filter(|c| c.status == s).count();
+    let drift =
+        v.health.reasons.iter().filter(|r| r.reason == AttentionReason::UnverifiedClaim).count();
+    Some(context! {
+        shipped => count(ClaimStatus::Shipped),
+        partial => count(ClaimStatus::Partial),
+        planned => count(ClaimStatus::Planned),
+        drift => drift,
+        title => v.feature.claims.iter().map(|c| format!("{} {}", c.component, c.status.as_str())).collect::<Vec<_>>().join(", "),
+    })
 }
 
 // ── Features ────────────────────────────────────────────────────────────────
@@ -337,6 +355,8 @@ pub struct FeatureFilter {
     pub q: Option<String>,
     pub sort: String,
     pub limit: usize,
+    /// Optional column groups: `claims`.
+    pub cols: Vec<String>,
 }
 
 impl FeatureFilter {
@@ -360,6 +380,7 @@ impl FeatureFilter {
             q: q.get("q").filter(|s| !s.is_empty()).cloned(),
             sort: q.get("sort").cloned().unwrap_or_else(|| "rank".into()),
             limit: q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(100),
+            cols: list("cols"),
         }
     }
 
@@ -380,6 +401,9 @@ impl FeatureFilter {
         }
         if self.sort != "rank" {
             parts.push(format!("sort={}", self.sort));
+        }
+        if !self.cols.is_empty() {
+            parts.push(format!("cols={}", self.cols.join(",")));
         }
         if self.limit != 100 {
             parts.push(format!("limit={}", self.limit));
@@ -458,7 +482,8 @@ fn feature_table_ctx(st: &ProjectState, f: &FeatureFilter) -> Value {
         rows => rows,
         total => total,
         shown => rows.len(),
-        filter => context! { state => f.state.clone(), importance => f.importance.clone(), tag => f.tag.clone(), group => f.group.clone(), owner => f.owner.clone(), q => f.q.clone(), sort => f.sort.clone(), limit => f.limit },
+        filter => context! { state => f.state.clone(), importance => f.importance.clone(), tag => f.tag.clone(), group => f.group.clone(), owner => f.owner.clone(), q => f.q.clone(), sort => f.sort.clone(), limit => f.limit, cols => f.cols.clone() },
+        show_claims => f.cols.iter().any(|c| c == "claims"),
         query => f.canonical(),
         groups => groups,
         tags => tags,
@@ -749,7 +774,13 @@ async fn test_detail(
         .iter()
         .flat_map(|r| r.artifacts.iter())
         .filter_map(|a| st.artifacts.get(a))
-        .map(|a| context! { id => a.id.as_str(), kind => a.kind.as_str(), role => a.role.as_str(), name => a.name.clone(), url => artifact_url(&st, a), exists => a.exists })
+        .map(|a| context! { id => a.id.as_str(), kind => a.kind.as_str(), role => a.role.as_str(), name => a.name.clone(), url => artifact_url(&st, a), exists => a.exists, file => match &a.path { ArtifactPath::Project(p) => Some(st.project.root.join(p.as_str()).display().to_string()), ArtifactPath::External(p) => Some(p.display().to_string()), _ => None } })
+        .collect();
+    let visuals: Vec<Value> = st
+        .visuals
+        .iter()
+        .filter(|(_, v)| v.latest.test.as_ref() == Some(&t.test.id))
+        .map(|(id, v)| super::visual::visual_row(&st, id, v))
         .collect();
     let suite = st.suites.iter().find(|s| s.id == t.test.suite);
     let run = t.latest.as_ref().and_then(|r| st_run(&st, &r.run));
@@ -776,6 +807,7 @@ async fn test_detail(
             latest => t.latest.as_ref().map(Value::from_serialize),
             history => history,
             artifacts => artifacts,
+            visuals => visuals,
             suite => suite.map(Value::from_serialize),
             run => run,
             duration_trend => t.duration_trend.map(|(p, l, r)| context! { previous => p, latest => l, rel => r }),

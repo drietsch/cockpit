@@ -2,7 +2,7 @@
 <div class="table-wrap" hx-target="#main" hx-swap="outerHTML show:window:top">
 <table class="ledger matrix" data-keynav>
   <thead><tr>
-    <th class="w-icon"></th><th>Feature</th><th>State</th><th class="c">Unit</th><th class="c">Int</th><th class="c">E2E</th><th class="c">Visual</th><th class="c">Perf</th><th class="r">ADR</th><th class="r">Changed</th>
+    <th class="w-icon"></th><th>Feature</th><th>State</th><th class="c">Unit</th><th class="c">Int</th><th class="c">E2E</th><th class="c">Visual</th><th class="c">Perf</th>{% if show_claims %}<th>Claims</th>{% endif %}<th class="r">ADR</th><th class="r">Changed</th>
     {% if shell.multi_repo %}<th>Repo</th>{% endif %}
   </tr></thead>
   <tbody>
@@ -12,6 +12,7 @@
     <td><a class="t" href="{{ url_for('feature', f.id) }}">{{ f.title }}</a>{% if f.group %}<span class="muted xs"> · {{ f.group }}</span>{% endif %}<div class="muted mono xs">{{ f.id }}</div></td>
     <td class="nowrap">{{ m.status(f.state) }}</td>
     <td class="c">{{ m.glyph(f.unit) }}</td><td class="c">{{ m.glyph(f.integration) }}</td><td class="c">{{ m.glyph(f.e2e) }}</td><td class="c">{{ m.glyph(f.visual) }}</td><td class="c">{{ m.glyph(f.perf) }}</td>
+    {% if show_claims %}<td class="nowrap xs claims-cell" title="{{ f.claims_summary.title if f.claims_summary else '' }}">{% if f.claims_summary %}<span class="claim claim--shipped">● {{ f.claims_summary.shipped }}</span> <span class="claim claim--partial">◐ {{ f.claims_summary.partial }}</span> <span class="claim claim--planned">○ {{ f.claims_summary.planned }}</span>{% if f.claims_summary.drift %} <span class="warn" title="shipped claims without evidence">⚠ {{ f.claims_summary.drift }}</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
     <td class="r mono">{{ f.adrs or '' }}</td>
     <td class="r mono muted nowrap">{{ m.ago(f.changed_at) }}</td>
     {% if shell.multi_repo %}<td class="muted xs">{{ f.changed_repo or '' }}</td>{% endif %}
