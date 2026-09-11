@@ -31,6 +31,13 @@ impl ArtifactRoots {
         if located.root.join(".git").exists() && !named.iter().any(|(n, _)| n == "root") {
             named.push(("root".into(), located.root.clone()));
         }
+        // The directory holding cockpit.toml (features, ADRs, test maps) is always viewable,
+        // even on an umbrella project where it is not a repository of its own.
+        if let Some(dir) = located.config_path.as_ref().and_then(|p| p.parent()) {
+            if dir != located.root && !named.iter().any(|(_, p)| p == dir) {
+                named.push(("config".into(), dir.to_path_buf()));
+            }
+        }
         named.push(("evidence".into(), located.evidence_dir()));
         let mut external: Vec<PathBuf> = located
             .config

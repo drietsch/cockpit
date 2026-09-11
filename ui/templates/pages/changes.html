@@ -1,20 +1,34 @@
 {% extends "base.html" %}
 {% block main %}
 <div class="page-h"><h1>Changes</h1><span class="muted">{{ rows | length }} of {{ total | number }} commits{% if feature %} · affecting <a href="{{ url_for('feature', feature) }}">{{ feature }}</a>{% endif %}</span></div>
-<form class="filters" method="get" action="/changes">
-  {% if repos | length > 1 %}<select name="repo" aria-label="Repository" onchange="this.form.requestSubmit()"><option value="">All repositories</option>{% for r in repos %}<option value="{{ r }}"{% if repo == r %} selected{% endif %}>{{ r }}</option>{% endfor %}</select>{% endif %}
+<form class="filters" method="get" action="/changes" hx-get="/changes" hx-trigger="change" hx-push-url="true">
+  {% if repos | length > 1 %}<select name="repo" aria-label="Repository"><option value="">All repositories</option>{% for r in repos %}<option value="{{ r }}"{% if repo == r %} selected{% endif %}>{{ r }}</option>{% endfor %}</select>{% endif %}
   {% if feature %}<input type="hidden" name="feature" value="{{ feature }}">{% endif %}
+  <label class="chip-toggle{% if affecting %} is-on{% endif %}"><input type="checkbox" name="affecting" value="1"{% if affecting %} checked{% endif %}>Only commits affecting a feature</label>
   <noscript><button class="btn">Apply</button></noscript>
 </form>
-<table class="ledger" data-keynav>
+<div class="grid-7-5">
+<div>
+<table class="ledger changes" data-keynav>
   {% for c in rows %}
-  <tr data-href="{{ url_for('commit', c.sha, c.repo) }}">
+  {% if loop.first or loop.previtem.day != c.day %}<tr class="divider"><td colspan="5">{{ c.at | datetime('date') }}</td></tr>{% endif %}
+  {% for t in c.tags %}<tr class="divider divider--tag"><td colspan="5"><span class="chip chip--tag">{{ t }}</span></td></tr>{% endfor %}
+  <tr data-href="{{ url_for('commit', c.sha, c.repo) }}" data-id="{{ c.sha }}">
     <td class="muted mono w-ago">{{ m.ago(c.at) }}</td>
     <td class="mono w-sha">{% if shell.multi_repo %}<span class="repo-badge">{{ c.repo }}</span> {% endif %}{{ c.short }}</td>
-    <td><div class="t">{{ c.subject }}</div><div class="xs">{% for f in c.features %}<a class="chip{% if not f.explicit %} chip--inferred{% endif %}" href="{{ url_for('feature', f.id) }}" title="{{ f.note }}">{{ m.glyph(f.state) }} {{ f.title }}</a> {% endfor %}{% for a in c.adr_refs %}<a class="chip chip--adr" href="{{ url_for('adr', a) }}">{{ a }}</a> {% endfor %}{% for t in c.tags %}<span class="chip chip--tag">{{ t }}</span> {% endfor %}</div></td>
+    <td><div class="t">{{ c.subject }}</div><div class="xs">{% for f in c.features %}<a class="chip{% if not f.explicit %} chip--inferred{% endif %}" href="{{ url_for('feature', f.id) }}" title="{{ f.note }}">{{ m.glyph(f.state) }} {{ f.title }}</a> {% endfor %}{% for a in c.adr_refs %}<a class="chip chip--adr" href="{{ url_for('adr', a) }}">{{ a }}</a> {% endfor %}{% if c.after %}<span class="strip strip--after" title="validation after this commit">{% for k in c.after %}<span class="strip__k">{{ k.label }} {{ m.glyph(k.status, k.status == 'stale' and 'evidence predates this commit' or 'evidence produced after this commit') }}</span>{% endfor %}</span>{% endif %}</div></td>
     <td class="r muted xs nowrap">{{ c.author }}</td>
     <td class="r mono xs nowrap"><span class="ok">+{{ c.added }}</span> <span class="bad">−{{ c.deleted }}</span></td>
   </tr>
   {% endfor %}
 </table>
+{% if rows | length >= limit %}<div class="table-foot"><a href="/changes?limit={{ limit * 3 }}{% if repo %}&repo={{ repo }}{% endif %}{% if feature %}&feature={{ feature }}{% endif %}">Show more</a></div>{% endif %}
+</div>
+<div>
+  {{ m.section('Timeline') }}
+  {% if events %}
+  <ol class="timeline">{% for e in events %}<li class="tl tl--{{ e.glyph }}"><a href="{{ e.target }}"><span class="tl__g">{{ m.glyph(e.glyph) }}</span><span class="tl__t">{{ e.text | truncate_chars(110) }}</span><span class="tl__m muted xs">{{ e.label }} · {{ m.ago(e.at) }}</span></a></li>{% endfor %}</ol>
+  {% else %}<div class="empty empty--calm">Events appear as scans observe changes: implementation commits, health transitions, decisions, regressions.</div>{% endif %}
+</div>
+</div>
 {% endblock %}

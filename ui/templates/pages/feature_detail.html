@@ -58,6 +58,11 @@
         {% if adrs %}<table class="ledger">{% for a in adrs %}<tr data-href="{{ url_for('adr', a.id) }}"><td class="mono w-sha">{{ a.id }}</td><td><a class="t" href="{{ url_for('adr', a.id) }}">{{ a.title }}</a></td><td class="nowrap">{{ m.status(a.status) }}</td></tr>{% endfor %}</table>
         {% else %}<div class="muted xs">No ADRs linked.</div>{% endif %}
       </section>
+      {% if events %}
+      <section id="timeline">{{ m.section('Timeline', '/changes?feature=' ~ f.id, 'All') }}
+        <ol class="timeline">{% for e in events %}<li class="tl tl--{{ e.glyph }}"><a href="{{ e.target }}"><span class="tl__g">{{ m.glyph(e.glyph) }}</span><span class="tl__t">{{ e.text | truncate_chars(100) }}</span><span class="tl__m muted xs">{{ e.label }} · {{ m.ago(e.at) }}</span></a></li>{% endfor %}</ol>
+      </section>
+      {% endif %}
       {% if feature.paths %}<section>{{ m.section('Paths') }}<ul class="mono xs paths">{% for p in feature.paths %}<li>{{ p }}</li>{% endfor %}</ul></section>{% endif %}
       <section class="muted xs">Source: <a href="{{ url_for('file', source_path, 'root') }}">{{ source_path }}</a></section>
     </div>

@@ -4,6 +4,7 @@
 pub mod api;
 pub mod artifacts;
 pub mod assets;
+pub mod files;
 pub mod hx;
 pub mod markdown;
 pub mod perf;
@@ -71,6 +72,7 @@ pub fn build_router(app: AppState) -> Router {
         .route("/events", axum::routing::get(sse::events))
         .route("/assets/{*path}", axum::routing::get(assets::serve))
         .route("/artifacts/{root}/{*path}", axum::routing::get(artifacts::serve))
+        .route("/files/{repo}/{*path}", axum::routing::get(files::file))
         .route("/healthz", axum::routing::get(|| async { "ok" }))
         .fallback(routes::not_found)
         .layer(middleware::from_fn(security_headers))

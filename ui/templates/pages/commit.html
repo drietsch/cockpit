@@ -20,10 +20,25 @@
       </section>
     </div>
     <div>
+      {% if after %}
+      <section>{{ m.section('Validation after this commit') }}
+        <table class="kv-table">{% for k in after %}<tr><td class="kv-k">{{ k.label }}</td><td>{{ m.status(k.status == 'stale' and 'stale' or k.status) }}</td><td class="muted xs">{% if k.status == 'stale' %}latest evidence predates this commit{% elif k.status == 'pass' %}evidence produced after this commit passes{% elif k.status == 'fail' %}evidence produced after this commit fails{% else %}evidence produced after this commit needs attention{% endif %}</td></tr>{% endfor %}</table>
+      </section>
+      {% endif %}
       <section>{{ m.section('Affected features') }}
         {% if c.features %}<table class="ledger">{% for f in c.features %}<tr data-href="{{ url_for('feature', f.id) }}"><td class="w-icon">{{ m.glyph(f.state) }}</td><td><a class="t" href="{{ url_for('feature', f.id) }}">{{ f.title }}</a><div class="muted xs">{{ f.note }}</div></td></tr>{% endfor %}</table>
         {% else %}<div class="muted xs">No feature references or path matches.</div>{% endif %}
       </section>
+      {% if bench_runs %}
+      <section>{{ m.section('Benchmarks at this commit') }}
+        <table class="ledger perf">{% for b in bench_runs %}<tr data-href="{{ url_for('benchmark', b.id) }}"><td class="w-icon">{{ m.glyph(b.status) }}</td><td><a class="t" href="{{ url_for('benchmark', b.id) }}">{{ b.label | truncate_chars(50) }}</a></td><td class="r mono nowrap">{{ b.value_text }}</td><td class="r mono nowrap {{ b.change_class }}">{% if b.change is not none and b.class_key != 'incomparable' %}{{ b.change | pct }}{% endif %}</td></tr>{% endfor %}</table>
+      </section>
+      {% endif %}
+      {% if events %}
+      <section>{{ m.section('Timeline') }}
+        <ol class="timeline">{% for e in events %}<li class="tl tl--{{ e.glyph }}"><a href="{{ e.target }}"><span class="tl__g">{{ m.glyph(e.glyph) }}</span><span class="tl__t">{{ e.text | truncate_chars(100) }}</span><span class="tl__m muted xs">{{ e.label }} · {{ m.ago(e.at) }}</span></a></li>{% endfor %}</ol>
+      </section>
+      {% endif %}
       {% if adr_refs %}<section>{{ m.section('Decisions cited') }}<table class="ledger">{% for a in adr_refs %}<tr{% if a.resolved_id %} data-href="{{ url_for('adr', a.resolved_id) }}"{% endif %}><td class="mono w-sha">{{ a.id }}</td><td>{% if a.resolved_id %}<a class="t" href="{{ url_for('adr', a.resolved_id) }}">{{ a.title }}</a>{% else %}<span class="muted">not found</span>{% endif %}</td></tr>{% endfor %}</table></section>{% endif %}
     </div>
   </div>

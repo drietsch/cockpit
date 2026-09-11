@@ -8,6 +8,12 @@ use crate::store::Store;
 use jiff::Timestamp;
 use std::collections::{BTreeMap, HashMap};
 
+/// Open items, ranked, plus the previously open items this build resolved.
+pub struct Collected {
+    pub items: Vec<AttentionItem>,
+    pub resolved: Vec<AttentionItem>,
+}
+
 pub fn collect(
     features: &BTreeMap<FeatureId, FeatureView>,
     warnings: &[ImportWarning],
@@ -15,7 +21,7 @@ pub fn collect(
     extra: Vec<AttentionItem>,
     store: &Store,
     now: Timestamp,
-) -> crate::store::Result<Vec<AttentionItem>> {
+) -> crate::store::Result<Collected> {
     let mut items: Vec<AttentionItem> = extra;
     for v in features.values() {
         for r in &v.health.reasons {
@@ -105,12 +111,14 @@ pub fn collect(
         it.score = score(it, features, now);
     }
     let live: std::collections::HashSet<AttentionId> = items.iter().map(|i| i.id.clone()).collect();
+    let mut resolved_items = Vec::new();
     for (id, prev) in persisted {
         if !live.contains(&id) && prev.status == AttentionStatus::Open {
             let mut resolved = prev.clone();
             resolved.status = AttentionStatus::Resolved;
             resolved.resolved_at = Some(now);
             store.upsert_attention(&resolved)?;
+            resolved_items.push(resolved);
         }
     }
     items.sort_by(|a, b| {
@@ -119,7 +127,7 @@ pub fn collect(
             .then_with(|| b.first_seen.cmp(&a.first_seen))
             .then_with(|| a.id.cmp(&b.id))
     });
-    Ok(items)
+    Ok(Collected { items, resolved: resolved_items })
 }
 
 fn score(it: &AttentionItem, features: &BTreeMap<FeatureId, FeatureView>, now: Timestamp) -> i32 {

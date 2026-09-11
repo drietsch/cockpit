@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block main %}
+<article class="detail file">
+  <header class="detail__h">
+    <div class="detail__title"><h1 class="mono file__path">{% if shell.multi_repo %}<span class="repo-badge">{{ repo }}</span> {% endif %}{% for c in crumbs %}{% if not loop.last %}<span class="muted">{{ c.name }}/</span>{% else %}{{ c.name }}{% endif %}{% endfor %}</h1>{{ m.idchip(path) }}</div>
+    <div class="muted xs">{{ size | number }} bytes{% if line_count %} · {{ line_count | number }} lines{% endif %} · {{ lang }} · read-only</div>
+  </header>
+  {% if image_url %}
+  <div class="file__image"><img src="{{ image_url }}" alt="{{ path }}"></div>
+  {% elif binary %}
+  <div class="empty">Binary file — not shown.</div>
+  {% elif truncated %}
+  <div class="empty">File is larger than 2 MiB — not shown inline.</div>
+  {% else %}
+  <div class="code-wrap"><table class="code" data-lines>{% for l in lines %}<tr id="L{{ loop.index }}"><td class="code__n"><a href="#L{{ loop.index }}">{{ loop.index }}</a></td><td class="code__l"><pre>{{ l }}</pre></td></tr>{% endfor %}</table></div>
+  {% endif %}
+</article>
+{% endblock %}

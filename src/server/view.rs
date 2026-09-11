@@ -155,6 +155,7 @@ fn status_icon(state: String) -> Value {
             ("warn", "warn")
         }
         "reported" => ("info", "sec"),
+        "change" => ("commit", "sec"),
         "broken" | "fail" | "failed" | "budget_breach" | "rejected" | "error" => ("x", "bad"),
         "unknown" | "incomparable" | "first_run" => ("help", "unk"),
         "missing" | "silent" | "skipped" => ("minus", "mut"),

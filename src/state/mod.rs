@@ -4,6 +4,7 @@
 pub mod attention;
 pub mod benchmark_cmp;
 pub mod build;
+pub mod events;
 pub mod freshness;
 pub mod health;
 pub mod rollup;

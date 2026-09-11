@@ -362,8 +362,9 @@ impl Store {
         Ok(())
     }
 
-    pub fn insert_event(&self, e: &EngineeringEvent) -> Result<()> {
-        self.conn.execute(
+    /// Insert if new; `Ok(true)` when the row did not exist before.
+    pub fn insert_event(&self, e: &EngineeringEvent) -> Result<bool> {
+        let n = self.conn.execute(
             "INSERT OR IGNORE INTO events(id, data_json, kind, at, feature_id) VALUES(?1, ?2, ?3, ?4, ?5)",
             params![
                 e.id.as_str(),
@@ -373,7 +374,7 @@ impl Store {
                 e.feature.as_ref().map(|f| f.as_str().to_string())
             ],
         )?;
-        Ok(())
+        Ok(n > 0)
     }
 }
 

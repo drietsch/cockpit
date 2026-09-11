@@ -91,13 +91,19 @@ fn fresh_passing_evidence_is_healthy_and_a_later_change_makes_it_stale() {
     assert_eq!(st.feature("FEAT-001").unwrap().health.state, HealthState::Healthy);
     assert_eq!(c.store.count("runs").unwrap(), 2, "each distinct report is a run in history");
     assert_eq!(st.tests.values().next().unwrap().history.len(), 2);
+    let kinds: Vec<&str> = st.events.iter().map(|e| e.kind.as_str()).collect();
+    assert!(kinds.contains(&"feature_changed"), "{kinds:?}");
+    assert!(kinds.contains(&"feature_attention"), "{kinds:?}");
+    assert!(kinds.contains(&"feature_recovered"), "{kinds:?}");
     assert!(
-        st.events
-            .iter()
-            .any(|e| e.kind.as_str() == "feature_recovered"
-                || e.kind.as_str() == "feature_validated")
-            || true
+        kinds.contains(&"attention_opened") && kinds.contains(&"attention_resolved"),
+        "{kinds:?}"
     );
+    // Re-deriving is idempotent: a scan without changes adds no events.
+    let n = st.events.len();
+    drop(st);
+    c.scan(None).unwrap();
+    assert_eq!(c.state.load().events.len(), n);
 }
 
 #[test]

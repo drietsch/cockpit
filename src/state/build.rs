@@ -660,14 +660,15 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
     let mut extra_items = suite_reasons;
     extra_items.extend(unlinked_items);
     extra_items.extend(bench_items);
-    let attention = crate::state::attention::collect(
-        &feature_views,
-        &warnings,
-        &unresolved,
-        extra_items,
-        store,
-        now,
-    )?;
+    let crate::state::attention::Collected { items: attention, resolved: resolved_attention } =
+        crate::state::attention::collect(
+            &feature_views,
+            &warnings,
+            &unresolved,
+            extra_items,
+            store,
+            now,
+        )?;
 
     // Counts, headline.
     let mut counts = StateCounts {
@@ -726,8 +727,19 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
         visuals.values().filter(|v| v.latest.status == VisualStatus::Stale).count();
     let (overall, headline) = headline(&counts);
 
-    // Persist derived rows.
+    // Persist derived rows; events are derived against what the store remembered before
+    // this build overwrote it.
     store.batch_begin()?;
+    let new_events = crate::state::events::produce(&crate::state::events::EventInput {
+        store,
+        features: &feature_views,
+        adrs: &adr_views,
+        benchmarks: &benchmarks,
+        commits: &commits,
+        attention: &attention,
+        resolved: &resolved_attention,
+        now,
+    })?;
     store.replace_relationships(&relationships, &unresolved)?;
     for (id, v) in &feature_views {
         store.upsert_feature_health(id, &v.health)?;
@@ -736,6 +748,7 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
         store.upsert_attention(a)?;
     }
     store.batch_commit()?;
+    tracing::debug!("{} new events", new_events.len());
 
     let generation = input.previous.map(|p| p.generation + 1).unwrap_or(1);
     Ok(ProjectState {

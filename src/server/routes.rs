@@ -138,6 +138,55 @@ pub fn attention_row(st: &ProjectState, a: &AttentionItem) -> Value {
     }
 }
 
+pub fn event_row(st: &ProjectState, e: &EngineeringEvent) -> Value {
+    let target = match (&e.subject, &e.feature) {
+        (Some(s), _) if s.kind == EvidenceKind::Commit => {
+            let repo = e.payload.get("repo").and_then(|r| r.as_str()).unwrap_or("");
+            format!(
+                "/commits/{}?repo={}",
+                super::view::urlencode(&s.id),
+                super::view::urlencode(repo)
+            )
+        }
+        (Some(s), _) if s.kind == EvidenceKind::Adr => {
+            format!("/adrs/{}", super::view::urlencode(&s.id))
+        }
+        (Some(s), _) if s.kind == EvidenceKind::Benchmark => {
+            format!("/performance/{}", super::view::urlencode(&s.id))
+        }
+        (Some(s), _) if s.kind == EvidenceKind::Attention => {
+            format!("/attention#{}", super::view::urlencode(&s.id))
+        }
+        (_, Some(f)) => format!("/features/{}", super::view::urlencode(f.as_str())),
+        _ => "/changes".into(),
+    };
+    let glyph = match e.kind {
+        EventKind::FeatureBroken
+        | EventKind::RegressionDetected
+        | EventKind::VisualRegressionDetected => "broken",
+        EventKind::FeatureAttention | EventKind::EvidenceStale | EventKind::AttentionOpened => {
+            "attention"
+        }
+        EventKind::FeatureRecovered
+        | EventKind::FeatureValidated
+        | EventKind::AdrAccepted
+        | EventKind::AttentionResolved => "healthy",
+        EventKind::FeatureChanged => "change",
+        _ => "unknown",
+    };
+    context! {
+        id => e.id.as_str(),
+        kind => e.kind.as_str(),
+        label => e.kind.label(),
+        at => e.at.to_string(),
+        feature => e.feature.as_ref().map(|f| f.as_str().to_string()),
+        feature_title => e.feature.as_ref().and_then(|f| st.features.get(f)).map(|f| f.feature.title.clone()),
+        text => e.text.clone(),
+        target => target,
+        glyph => glyph,
+    }
+}
+
 pub fn change_rows(
     st: &ProjectState,
     feature: Option<&str>,
@@ -177,6 +226,12 @@ pub fn commit_row(st: &ProjectState, c: &crate::state::CommitView) -> Value {
         .collect();
     let added: u32 = c.commit.files.iter().filter_map(|f| f.added).sum();
     let deleted: u32 = c.commit.files.iter().filter_map(|f| f.deleted).sum();
+    let day = c
+        .commit
+        .committed_at
+        .to_zoned(jiff::tz::TimeZone::system())
+        .strftime("%Y-%m-%d")
+        .to_string();
     context! {
         repo => c.commit.key.repo.as_str(),
         sha => c.commit.key.sha.as_str(),
@@ -184,6 +239,8 @@ pub fn commit_row(st: &ProjectState, c: &crate::state::CommitView) -> Value {
         subject => c.commit.subject.clone(),
         author => c.commit.author.clone(),
         at => c.commit.committed_at.to_string(),
+        day => day,
+        after => validation_after(st, c),
         features => feats,
         adr_refs => c.adr_refs.iter().map(|a| a.as_str().to_string()).collect::<Vec<_>>(),
         files => c.commit.files.len(),
@@ -191,6 +248,45 @@ pub fn commit_row(st: &ProjectState, c: &crate::state::CommitView) -> Value {
         deleted => deleted,
         tags => c.commit.tags(),
     }
+}
+
+/// Validation after a commit: for every evidence kind of the affected features, whether the
+/// latest evidence was produced after this commit (`pass`/`fail`), or predates it (`stale`).
+pub fn validation_after(st: &ProjectState, c: &crate::state::CommitView) -> Vec<Value> {
+    let at = c.commit.committed_at;
+    let mut kinds: Vec<(EvidenceCategory, &'static str)> = Vec::new();
+    for (id, _) in &c.features {
+        let Some(f) = st.features.get(id) else { continue };
+        for r in &f.health.rollups {
+            if matches!(r.status, RollupStatus::Missing | RollupStatus::Silent) {
+                continue;
+            }
+            let word = match r.latest {
+                Some(t) if t >= at => match r.status {
+                    RollupStatus::Fail | RollupStatus::BudgetBreach => "fail",
+                    RollupStatus::Regression | RollupStatus::Flaky => "attention",
+                    _ => "pass",
+                },
+                _ => "stale",
+            };
+            match kinds.iter_mut().find(|(k, _)| *k == r.category) {
+                Some(e) => {
+                    let rank = |w: &str| match w {
+                        "fail" => 0,
+                        "attention" => 1,
+                        "stale" => 2,
+                        _ => 3,
+                    };
+                    if rank(word) < rank(e.1) {
+                        e.1 = word;
+                    }
+                }
+                None => kinds.push((r.category, word)),
+            }
+        }
+    }
+    kinds.sort_by_key(|(k, _)| EvidenceCategory::ALL.iter().position(|c| c == k));
+    kinds.into_iter().map(|(k, w)| context! { label => k.label(), status => w }).collect()
 }
 
 pub fn feature_row(_st: &ProjectState, v: &FeatureView) -> Value {
@@ -797,6 +893,7 @@ async fn feature_detail(
             commits => commits,
             adrs => adrs,
             benchmarks => v.benchmarks.iter().filter_map(|b| st.benchmarks.get(b)).map(|b| super::perf::benchmark_row(&st, b)).collect::<Vec<_>>(),
+            events => st.events.iter().filter(|e| e.feature.as_ref() == Some(&f.id)).take(30).map(|e| event_row(&st, e)).collect::<Vec<_>>(),
             impl_commit => v.impl_commit.as_ref().map(|c| context! { repo => c.repo.as_str(), sha => c.sha.as_str(), short => c.sha.short(), at => v.impl_committed_at.map(|t| t.to_string()), subject => st.commits.get(c).map(|x| x.commit.subject.clone()) }),
             entity_id => f.id.as_str(),
             sources => Value::from_serialize(&st.sources),
@@ -884,12 +981,17 @@ async fn changes(
 ) -> Result<Page, AppError> {
     let st = app.state.load();
     let limit: usize = q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(100);
-    let rows = change_rows(
+    let affecting = q.get("affecting").map(|v| v == "1" || v == "true").unwrap_or(false);
+    let mut rows = change_rows(
         &st,
         q.get("feature").map(|s| s.as_str()),
         q.get("repo").map(|s| s.as_str()),
-        limit,
+        if affecting { limit * 5 } else { limit },
     );
+    if affecting {
+        rows.retain(|r| r.get_attr("features").map(|f| f.len().unwrap_or(0) > 0).unwrap_or(false));
+        rows.truncate(limit);
+    }
     let repos: Vec<String> = st
         .project
         .repos
@@ -897,13 +999,24 @@ async fn changes(
         .filter(|r| r.head.is_some())
         .map(|r| r.id.as_str().to_string())
         .collect();
+    let events: Vec<Value> = st
+        .events
+        .iter()
+        .filter(|e| {
+            q.get("feature")
+                .map(|f| e.feature.as_ref().map(|x| x.as_str() == f).unwrap_or(false))
+                .unwrap_or(true)
+        })
+        .take(60)
+        .map(|e| event_row(&st, e))
+        .collect();
     render(
         &app,
         &hx,
         "pages/changes.html",
         "Changes",
         "changes",
-        context! { rows => rows, repos => repos, feature => q.get("feature"), repo => q.get("repo"), limit => limit, total => st.commits.len() },
+        context! { rows => rows, repos => repos, feature => q.get("feature"), repo => q.get("repo"), limit => limit, total => st.commits.len(), events => events, affecting => affecting },
     )
 }
 
@@ -955,7 +1068,17 @@ async fn commit(
         "pages/commit.html",
         &format!("{} {}", c.commit.short(), c.commit.subject),
         "changes",
-        context! { c => commit_row(&st, c), commit => Value::from_serialize(&c.commit), files => files, body_html => Value::from_safe_string(body_html), adr_refs => adr_refs, entity_id => c.commit.key.sha.as_str() },
+        context! {
+            c => commit_row(&st, c),
+            commit => Value::from_serialize(&c.commit),
+            files => files,
+            body_html => Value::from_safe_string(body_html),
+            adr_refs => adr_refs,
+            after => validation_after(&st, c),
+            bench_runs => st.benchmarks.values().filter(|b| b.history.iter().any(|r| r.commit.as_ref().map(|x| x.key == c.commit.key).unwrap_or(false))).map(|b| super::perf::benchmark_row(&st, b)).collect::<Vec<_>>(),
+            events => st.events.iter().filter(|e| e.subject.as_ref().map(|s| s.kind == EvidenceKind::Commit && s.id == c.commit.key.sha.as_str()).unwrap_or(false) || c.features.iter().any(|(f, _)| e.feature.as_ref() == Some(f)) && e.at >= c.commit.committed_at).take(20).map(|e| event_row(&st, e)).collect::<Vec<_>>(),
+            entity_id => c.commit.key.sha.as_str(),
+        },
     )
 }
 
