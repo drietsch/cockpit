@@ -25,6 +25,7 @@ arc-swap = "1"
 axum = { version = "0.8", features = ["macros"] }
 blake3 = "1"
 clap = { version = "4", features = ["derive", "env"] }
+clap_complete = "4"
 comrak = "0.55"
 futures-util = "0.3"
 globset = "0.4"

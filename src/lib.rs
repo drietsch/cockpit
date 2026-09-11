@@ -18,6 +18,7 @@ pub mod migrate;
 pub mod model;
 pub mod paths;
 pub mod pull;
+pub mod query;
 pub mod scan;
 pub mod server;
 pub mod state;

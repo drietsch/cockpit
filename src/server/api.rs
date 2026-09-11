@@ -23,6 +23,7 @@ pub fn router() -> Router<AppState> {
         .route("/changes", get(changes))
         .route("/commits/{sha}", get(commit))
         .route("/search", get(search))
+        .route("/query", get(query))
         .route("/scan", post(scan))
 }
 
@@ -60,6 +61,35 @@ async fn features(
     Query(q): Query<HashMap<String, String>>,
 ) -> Response {
     let st = app.state.load();
+    // `?query=<expr>` runs the query language; the other parameters are the page filters.
+    if let Some(expr) = q.get("query").filter(|s| !s.trim().is_empty()) {
+        let parsed = match crate::query::parse(&format!("features where {expr}")) {
+            Ok(p) => p,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": { "code": "bad_query", "message": e } })),
+                )
+                    .into_response();
+            }
+        };
+        let rows = match crate::query::run(&st, &parsed) {
+            Ok(crate::query::Rows::Features(v)) => v
+                .into_iter()
+                .map(|v| to_json(super::routes::feature_row(&st, v)))
+                .collect::<Vec<_>>(),
+            Ok(_) => vec![],
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": { "code": "bad_query", "message": e } })),
+                )
+                    .into_response();
+            }
+        };
+        let n = rows.len();
+        return envelope(&app, serde_json::json!({ "items": rows, "total": n, "query": expr }));
+    }
     let filter = super::routes::FeatureFilter::from_query(&q);
     let rows: Vec<serde_json::Value> = super::routes::filtered_features(&st, &filter)
         .into_iter()
@@ -131,6 +161,34 @@ fn bad_request(e: &super::hx::AppError) -> Response {
         Json(serde_json::json!({ "error": { "code": "bad_request", "message": msg } })),
     )
         .into_response()
+}
+
+/// `GET /api/v1/query?q=<full query>` — any entity, ids and rows.
+async fn query(State(app): State<AppState>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let st = app.state.load();
+    let expr = q.get("q").cloned().unwrap_or_default();
+    let parsed = match crate::query::parse(&expr) {
+        Ok(p) => p,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": { "code": "bad_query", "message": e } })),
+            )
+                .into_response();
+        }
+    };
+    let (entity, items): (String, Vec<serde_json::Value>) = match crate::query::run(&st, &parsed) {
+        Ok(crate::query::Rows::Features(v)) => ("features".into(), v.into_iter().map(|v| to_json(super::routes::feature_row(&st, v))).collect()),
+        Ok(crate::query::Rows::Tests(v)) => ("tests".into(), v.into_iter().map(|t| to_json(super::routes::test_row(&st, t))).collect()),
+        Ok(crate::query::Rows::Benchmarks(v)) => ("benchmarks".into(), v.into_iter().map(|b| to_json(super::perf::benchmark_row(&st, b))).collect()),
+        Ok(crate::query::Rows::Adrs(v)) => ("adrs".into(), v.into_iter().map(|a| serde_json::json!({ "id": a.adr.id, "title": a.adr.title, "status": a.adr.status.as_str(), "features": a.features })).collect()),
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": { "code": "bad_query", "message": e } }))).into_response(),
+    };
+    let n = items.len();
+    envelope(
+        &app,
+        serde_json::json!({ "query": expr, "entity": entity, "count": n, "items": items }),
+    )
 }
 
 async fn attention(State(app): State<AppState>) -> Response {

@@ -4,8 +4,10 @@
 pub mod attention;
 pub mod doctor;
 pub mod feature;
+pub mod init;
 pub mod output;
 pub mod pull;
+pub mod query;
 pub mod scan;
 pub mod serve;
 pub mod status;
@@ -125,7 +127,14 @@ pub enum Command {
         strict: bool,
     },
     /// Structured query over project state
-    Query { expr: String },
+    Query {
+        expr: String,
+        /// table | ids | count | json
+        #[arg(long, default_value = "table")]
+        format: String,
+    },
+    /// Shell completions (bash, zsh, fish, powershell, elvish)
+    Completions { shell: clap_complete::Shell },
 }
 
 #[derive(Subcommand, Debug)]
@@ -230,13 +239,25 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
                 fmt,
             )
         }
-        Command::Init { .. } | Command::Query { .. } => {
-            fmt.error(
-                EXIT_USAGE,
-                "not_implemented",
-                "this command is not implemented in this build yet (planned for a later milestone)",
-            );
-            Ok(EXIT_USAGE)
+        Command::Init { from_cargo } => {
+            let root = match cli.project.as_deref() {
+                Some(p) if p.is_file() => {
+                    p.parent().map(|d| d.to_path_buf()).unwrap_or(cwd.clone())
+                }
+                Some(p) => p.to_path_buf(),
+                None => cwd.clone(),
+            };
+            init::run(&root, *from_cargo, fmt)
+        }
+        Command::Query { expr, format } => {
+            let c = open_scanned(cli)?;
+            query::run(&c, expr, format, fmt)
+        }
+        Command::Completions { shell } => {
+            use clap::CommandFactory;
+            let mut cmd = Cli::command();
+            clap_complete::generate(*shell, &mut cmd, "cockpit", &mut std::io::stdout());
+            Ok(EXIT_OK)
         }
     }
 }

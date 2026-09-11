@@ -81,6 +81,7 @@ pub fn run(c: &Cockpit, fmt: &Format) -> anyhow::Result<i32> {
         let mut matched = 0usize;
         let mut newest: Option<jiff::Timestamp> = None;
         for pat in src.paths() {
+            let pat = c.located.resolve_pattern(&pat);
             for p in crate::scan::glob_files(&c.located.root, &pat) {
                 matched += 1;
                 if let Ok(m) = std::fs::metadata(&p) {
@@ -95,7 +96,22 @@ pub fn run(c: &Cockpit, fmt: &Format) -> anyhow::Result<i32> {
         let gh = src
             .github
             .as_ref()
-            .map(|g| format!(" · github {}/{} {}", g.repo, g.workflow, g.artifact))
+            .map(|g| {
+                let dir = crate::pull::target_dir(&c.located.evidence_dir(), &id, &g.artifact);
+                let pulled = std::fs::read_to_string(dir.join("provenance.json"))
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                    .and_then(|v| {
+                        v.get("generated_at")
+                            .and_then(|g| g.as_str())
+                            .and_then(crate::time::parse_timestamp)
+                    })
+                    .map(|t| {
+                        format!(" · pulled run from {}", crate::time::ago(t, crate::time::now()))
+                    })
+                    .unwrap_or_else(|| " · not pulled yet".into());
+                format!(" · github {}/{} {}{pulled}", g.repo, g.workflow, g.artifact)
+            })
             .unwrap_or_default();
         if matched > 0 {
             ok(
@@ -120,6 +136,31 @@ pub fn run(c: &Cockpit, fmt: &Format) -> anyhow::Result<i32> {
                 ),
             );
         }
+    }
+    if c.located.evidence_sources().iter().any(|s| s.github.is_some()) {
+        match crate::pull::github::detect() {
+            Some(api) => ok(&mut rows, format!("github access via {}", api.describe())),
+            None => warn(
+                &mut rows,
+                "no GitHub credentials (gh auth login, or GITHUB_TOKEN) — cockpit pull will skip github sources".into(),
+            ),
+        }
+    }
+    let manifests = crate::scan::walk::manifests(&c.located);
+    if !manifests.is_empty() {
+        ok(
+            &mut rows,
+            format!(
+                "cargo workspace index · {} manifest{}",
+                manifests.len(),
+                if manifests.len() == 1 { "" } else { "s" }
+            ),
+        );
+    }
+    if let Ok(Some(t)) = c.store.meta_timestamp("last_scan_at") {
+        ok(&mut rows, format!("last scan {}", crate::time::ago(t, crate::time::now())));
+    } else {
+        warn(&mut rows, "never scanned — run cockpit scan".into());
     }
     match c.store.integrity_ok() {
         Ok(true) => ok(
