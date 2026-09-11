@@ -303,3 +303,141 @@ fn extract_zip(zip_path: &Path, dest: &Path) -> anyhow::Result<Vec<String>> {
     }
     Ok(files)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn zip_with(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut w = zip::ZipWriter::new(buf);
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, data) in entries {
+            w.start_file(*name, opts).unwrap();
+            w.write_all(data).unwrap();
+        }
+        w.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn target_dirs_and_safe_extraction() {
+        let t = tempfile::tempdir().unwrap();
+        assert_eq!(
+            target_dir(t.path(), "core/nextest-unit", "nextest-junit"),
+            t.path().join("core__nextest-unit").join("nextest-junit")
+        );
+        let z = t.path().join("a.zip");
+        std::fs::write(
+            &z,
+            zip_with(&[("junit.xml", b"<testsuites/>"), ("sub/report.json", b"{}")]),
+        )
+        .unwrap();
+        let dest = t.path().join("out");
+        std::fs::create_dir_all(&dest).unwrap();
+        let files = extract_zip(&z, &dest).unwrap();
+        assert_eq!(files, vec!["junit.xml", "sub/report.json"]);
+        assert!(dest.join("sub/report.json").exists());
+        // Zip-slip: an entry escaping the destination is refused before anything is written.
+        let evil = t.path().join("evil.zip");
+        std::fs::write(&evil, zip_with(&[("../escape.txt", b"x")])).unwrap();
+        let dest2 = t.path().join("out2");
+        std::fs::create_dir_all(&dest2).unwrap();
+        assert!(extract_zip(&evil, &dest2).is_err());
+        assert!(!t.path().join("escape.txt").exists());
+    }
+
+    /// A fake API: two runs, the newest without the artifact — the older one is chosen; a
+    /// second pull with the sidecar in place is up to date.
+    struct Fake;
+    impl GithubApi for Fake {
+        fn describe(&self) -> String {
+            "fake".into()
+        }
+        fn list_runs(&self, _: &str, _: &str, _: &str, _: u32) -> anyhow::Result<Vec<RunInfo>> {
+            Ok(vec![
+                RunInfo {
+                    id: 2,
+                    head_sha: "b".repeat(40),
+                    head_branch: Some("main".into()),
+                    conclusion: Some("failure".into()),
+                    event: Some("push".into()),
+                    run_attempt: Some(1),
+                    run_started_at: None,
+                    updated_at: "2026-09-11T10:00:00Z".into(),
+                    html_url: "https://x/2".into(),
+                },
+                RunInfo {
+                    id: 1,
+                    head_sha: "a".repeat(40),
+                    head_branch: Some("main".into()),
+                    conclusion: Some("failure".into()),
+                    event: Some("push".into()),
+                    run_attempt: Some(1),
+                    run_started_at: None,
+                    updated_at: "2026-09-10T10:00:00Z".into(),
+                    html_url: "https://x/1".into(),
+                },
+            ])
+        }
+        fn list_artifacts(&self, _: &str, run_id: u64) -> anyhow::Result<Vec<ArtifactInfo>> {
+            Ok(if run_id == 1 {
+                vec![ArtifactInfo {
+                    id: 11,
+                    name: "nextest-junit".into(),
+                    size_in_bytes: 10,
+                    expired: false,
+                    archive_download_url: None,
+                    created_at: Some("2026-09-10T09:59:00Z".into()),
+                }]
+            } else {
+                vec![]
+            })
+        }
+        fn download_artifact(&self, _: &str, _: &ArtifactInfo, dest: &Path) -> anyhow::Result<()> {
+            std::fs::write(dest, zip_with(&[("junit.xml", b"<testsuites/>")]))?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn picks_the_newest_run_with_the_artifact_and_is_idempotent() {
+        let t = tempfile::tempdir().unwrap();
+        let src = EvidenceSource {
+            id: Some("core/nextest".into()),
+            github: Some(crate::config::GithubSource {
+                repo: "o/r".into(),
+                workflow: "ci.yml".into(),
+                artifact: "nextest-junit".into(),
+                branch: None,
+                runs_to_inspect: None,
+            }),
+            ..EvidenceSource::default()
+        };
+        let opts = Options { dry_run: false, force: false, only: vec![] };
+        let r = pull_one(&Fake, &src, t.path(), &opts).unwrap();
+        assert!(
+            matches!(r.outcome, Outcome::Pulled { run_id: 1, artifact_id: 11, files: 1, .. }),
+            "{:?}",
+            r.outcome
+        );
+        assert_eq!(r.commit.as_deref(), Some("a".repeat(40).as_str()));
+        let side: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(t.path().join("core__nextest/nextest-junit/provenance.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(side["schema"], "cockpit.provenance.v1");
+        assert_eq!(
+            side["generated_at"], "2026-09-10T09:59:00Z",
+            "the artifact's upload time, never now"
+        );
+        assert_eq!(side["run"]["conclusion"], "failure", "a red run is evidence too");
+        let r = pull_one(&Fake, &src, t.path(), &opts).unwrap();
+        assert!(matches!(r.outcome, Outcome::UpToDate { run_id: 1 }));
+        let r =
+            pull_one(&Fake, &src, t.path(), &Options { dry_run: true, force: true, only: vec![] })
+                .unwrap();
+        assert!(matches!(r.outcome, Outcome::Pulled { .. }));
+    }
+}

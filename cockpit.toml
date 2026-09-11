@@ -1,0 +1,29 @@
+# Cockpit on itself. `cargo nextest run --profile ci` writes the JUnit report this file names.
+[project]
+id = "cockpit"
+name = "Cockpit"
+
+[features]
+path = "docs/features"
+id_pattern = "^FEAT-\\d{3}$"
+
+[adrs]
+path = "docs/adr"
+exclude = ["README.md"]
+
+[git]
+implementation_paths_exclude = ["docs/**", "design/**", "**/*.md", "cockpit.toml"]
+
+[[evidence]]
+id = "cockpit/nextest"
+title = "cargo nextest"
+format = "junit"
+kind = "unit"
+path = "target/nextest/ci/junit.xml"
+
+[health]
+max_evidence_age = "14d"
+required_evidence = { critical = ["test"], high = ["test"], normal = [], low = [] }
+
+[policy.references]
+fail_on_broken_reference = true
