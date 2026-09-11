@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block main %}
+<article class="detail">
+  <header class="detail__h row-{{ f.state }}">
+    <div class="detail__title"><h1>{{ f.title }}</h1>{{ m.idchip(f.id) }}</div>
+    <div class="detail__state">{{ m.status(f.state) }}<span class="detail__headline">{{ health.headline }}</span></div>
+    <dl class="kv kv--inline">
+      <dt>Importance</dt><dd>{{ f.importance }}</dd>
+      <dt>Lifecycle</dt><dd>{{ f.lifecycle }}</dd>
+      {% if f.owners %}<dt>Owner</dt><dd>{{ f.owners | join(', ') }}</dd>{% endif %}
+      {% if f.group %}<dt>Group</dt><dd>{{ f.group }}</dd>{% endif %}
+      <dt>Changed</dt><dd>{% if impl_commit %}{{ m.ago(impl_commit.at) }} · {{ m.commit_ref(impl_commit.repo, impl_commit.sha, impl_commit.subject, shell.multi_repo) }}{% else %}<span class="muted">no implementation commit known</span>{% endif %}</dd>
+      <dt>Confidence</dt><dd>{{ health.confidence }}</dd>
+    </dl>
+    {% if health.reasons %}
+    <ul class="reasons">{% for r in health.reasons %}<li class="reason reason--{{ r.severity }}">{{ m.glyph('attention') }} {{ r.text }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if health.chain %}
+    <details class="why"><summary>Why?</summary><ol class="why__chain">{% for s in health.chain %}<li><span class="why__c">{{ s.connective }}</span> {{ s.text }}</li>{% endfor %}</ol></details>
+    {% endif %}
+  </header>
+
+  <div class="grid-7-5">
+    <div>
+      {% if body_html %}<section class="prose">{{ body_html }}</section>{% endif %}
+      {% if feature.acceptance_criteria %}
+      <section>{{ m.section('Acceptance criteria') }}<ol class="ac">{% for c in feature.acceptance_criteria %}<li>{% if c.checked is not none %}<span class="mono muted">[{% if c.checked %}x{% else %} {% endif %}]</span> {% endif %}{{ c.text }}</li>{% endfor %}</ol></section>
+      {% endif %}
+      <section>{{ m.section('Recent change', '/changes?feature=' ~ f.id, 'All changes') }}
+        {% if commits %}<table class="ledger">{% for c in commits %}<tr data-href="{{ url_for('commit', c.sha, c.repo) }}"><td class="muted mono w-ago">{{ m.ago(c.at) }}</td><td class="mono w-sha">{% if shell.multi_repo %}<span class="repo-badge">{{ c.repo }}</span> {% endif %}{{ c.short }}</td><td><span class="t">{{ c.subject | truncate_chars(80) }}</span></td><td class="r muted xs">{{ c.note }}</td></tr>{% endfor %}</table>
+        {% else %}{{ m.empty('No commits linked', 'No commit mentions ' ~ f.id ~ ' and none touched its paths.') }}{% endif %}
+      </section>
+    </div>
+    <div>
+      <section id="evidence">{{ m.section('Evidence') }}
+        <table class="kv-table">{% for r in rollups %}<tr><td class="kv-k">{{ r.label }}</td><td>{{ m.status(r.status) }}</td><td class="muted xs">{{ r.summary }}{% if r.required and r.status == 'missing' %} <span class="bad">required</span>{% endif %}</td></tr>{% endfor %}</table>
+      </section>
+      <section id="freshness">{{ m.section('Evidence freshness') }}
+        {% if impl_commit %}<div class="sec xs">Latest implementation change: {{ m.commit_ref(impl_commit.repo, impl_commit.sha, impl_commit.subject, shell.multi_repo) }} · {{ m.ago(impl_commit.at) }}</div>{% endif %}
+        <table class="kv-table">{% for r in rollups %}<tr><td class="kv-k">{{ r.label }}</td><td>{% if r.freshness %}{% if r.freshness.change == 'fresh' %}{{ m.glyph('pass') }} after change{% elif r.freshness.change == 'stale' %}{{ m.glyph('stale') }} before {{ r.freshness.against }}{% else %}{{ m.glyph('unknown') }} unknown{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td></tr>{% endfor %}</table>
+      </section>
+      {% if feature.claims %}
+      <section id="claims">{{ m.section('Claims') }}
+        <table class="kv-table">{% for c in feature.claims %}<tr><td class="kv-k mono">{{ c.component }}</td><td><span class="claim claim--{{ c.status }}">{{ c.status }}</span></td><td class="muted xs">{{ c.note or '' }}</td></tr>{% endfor %}</table>
+        <div class="muted xs">Claims are shown, never counted as health.</div>
+      </section>
+      {% endif %}
+      <section id="adrs">{{ m.section('Architecture decisions') }}
+        {% if adrs %}<table class="ledger">{% for a in adrs %}<tr data-href="{{ url_for('adr', a.id) }}"><td class="mono w-sha">{{ a.id }}</td><td><a class="t" href="{{ url_for('adr', a.id) }}">{{ a.title }}</a></td><td class="nowrap">{{ m.status(a.status) }}</td></tr>{% endfor %}</table>
+        {% else %}<div class="muted xs">No ADRs linked.</div>{% endif %}
+      </section>
+      {% if feature.paths %}<section>{{ m.section('Paths') }}<ul class="mono xs paths">{% for p in feature.paths %}<li>{{ p }}</li>{% endfor %}</ul></section>{% endif %}
+      <section class="muted xs">Source: <a href="{{ url_for('file', source_path, 'root') }}">{{ source_path }}</a></section>
+    </div>
+  </div>
+</article>
+{% endblock %}

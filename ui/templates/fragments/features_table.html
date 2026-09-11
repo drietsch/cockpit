@@ -1,0 +1,23 @@
+{% import "components/macros.html" as m %}
+<div id="features-table" hx-get="/fragments/features/table{{ table.query }}" hx-trigger="cockpit:refresh from:body" hx-swap="morph:outerHTML" hx-target="this" data-live="features">
+<form class="filters" method="get" action="/features" hx-get="/fragments/features/table" hx-target="#features-table" hx-swap="morph:outerHTML" hx-trigger="change, submit, input changed delay:250ms from:[name=q]">
+  <div class="chips" role="group" aria-label="State">
+    {% for s in [['', 'All', table.total], ['broken', 'Broken', table.counts.broken], ['attention', 'Attention', table.counts.attention], ['unknown', 'Unknown', table.counts.unknown], ['healthy', 'Healthy', table.counts.healthy]] %}
+    <label class="chip-toggle{% if (s[0] == '' and not table.filter.state) or (s[0] in table.filter.state) %} is-on{% endif %}"><input type="radio" name="state" value="{{ s[0] }}"{% if (s[0] == '' and not table.filter.state) or (s[0] in table.filter.state) %} checked{% endif %}>{{ s[1] }} <span class="mono muted">{{ s[2] }}</span></label>
+    {% endfor %}
+  </div>
+  <select name="importance" aria-label="Importance"><option value="">Any importance</option>{% for i in ['critical','high','normal','low'] %}<option value="{{ i }}"{% if i in table.filter.importance %} selected{% endif %}>{{ i }}</option>{% endfor %}</select>
+  {% if table.groups %}<select name="group" aria-label="Group"><option value="">Any group</option>{% for g in table.groups %}<option value="{{ g }}"{% if table.filter.group == g %} selected{% endif %}>{{ g }}</option>{% endfor %}</select>{% endif %}
+  {% if table.owners %}<select name="owner" aria-label="Owner"><option value="">Any owner</option>{% for o in table.owners %}<option value="{{ o }}"{% if table.filter.owner == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select>{% endif %}
+  <select name="sort" aria-label="Sort"><option value="rank"{% if table.filter.sort == 'rank' %} selected{% endif %}>Sort: attention</option><option value="changed"{% if table.filter.sort == 'changed' %} selected{% endif %}>Sort: recently changed</option><option value="importance"{% if table.filter.sort == 'importance' %} selected{% endif %}>Sort: importance</option><option value="name"{% if table.filter.sort == 'name' %} selected{% endif %}>Sort: name</option><option value="id"{% if table.filter.sort == 'id' %} selected{% endif %}>Sort: id</option></select>
+  <input type="search" name="q" value="{{ table.filter.q or '' }}" placeholder="Filter…" aria-label="Filter features" data-page-filter>
+  <noscript><button class="btn">Apply</button></noscript>
+</form>
+{% if table.rows %}
+{% set matrix = table.rows %}
+{% include "fragments/_matrix_rows.html" %}
+{% if table.total > table.shown %}<div class="table-foot"><a href="/features{{ table.query }}{% if table.query %}&{% else %}?{% endif %}limit=100000">Show all {{ table.total }}</a></div>{% endif %}
+{% else %}
+{{ m.empty('No features match', 'Try a different state, group or search term.') }}
+{% endif %}
+</div>

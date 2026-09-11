@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block main %}
+<article class="detail">
+  <header class="detail__h">
+    <div class="detail__title"><h1>{{ commit.subject }}</h1></div>
+    <dl class="kv kv--inline">
+      <dt>Commit</dt><dd>{{ m.idchip(commit.key.sha) }}</dd>
+      {% if shell.multi_repo %}<dt>Repository</dt><dd>{{ commit.key.repo }}</dd>{% endif %}
+      <dt>Author</dt><dd>{{ commit.author }}</dd>
+      <dt>Date</dt><dd>{{ commit.committed_at | datetime('long') }} · {{ m.ago(commit.committed_at) }}</dd>
+      {% if c.tags %}<dt>Tags</dt><dd>{% for t in c.tags %}<span class="chip chip--tag">{{ t }}</span> {% endfor %}</dd>{% endif %}
+      <dt>Parents</dt><dd class="mono">{% for p in commit.parents %}<a href="{{ url_for('commit', p, commit.key.repo) }}">{{ p | short_sha }}</a> {% endfor %}</dd>
+    </dl>
+  </header>
+  <div class="grid-7-5">
+    <div>
+      {% if body_html %}<section class="prose">{{ body_html }}</section>{% endif %}
+      <section>{{ m.section('Changed files (' ~ files | length ~ ')') }}
+        <table class="ledger">{% for f in files %}<tr><td class="mono xs"><a href="{{ url_for('file', f.path, 'root') }}">{{ f.path }}</a>{% if f.kind != 'modified' %} <span class="muted">{{ f.kind }}</span>{% endif %}</td><td class="r mono xs nowrap"><span class="ok">+{{ f.added or 0 }}</span> <span class="bad">−{{ f.deleted or 0 }}</span></td></tr>{% endfor %}</table>
+      </section>
+    </div>
+    <div>
+      <section>{{ m.section('Affected features') }}
+        {% if c.features %}<table class="ledger">{% for f in c.features %}<tr data-href="{{ url_for('feature', f.id) }}"><td class="w-icon">{{ m.glyph(f.state) }}</td><td><a class="t" href="{{ url_for('feature', f.id) }}">{{ f.title }}</a><div class="muted xs">{{ f.note }}</div></td></tr>{% endfor %}</table>
+        {% else %}<div class="muted xs">No feature references or path matches.</div>{% endif %}
+      </section>
+      {% if adr_refs %}<section>{{ m.section('Decisions cited') }}<table class="ledger">{% for a in adr_refs %}<tr{% if a.resolved_id %} data-href="{{ url_for('adr', a.resolved_id) }}"{% endif %}><td class="mono w-sha">{{ a.id }}</td><td>{% if a.resolved_id %}<a class="t" href="{{ url_for('adr', a.resolved_id) }}">{{ a.title }}</a>{% else %}<span class="muted">not found</span>{% endif %}</td></tr>{% endfor %}</table></section>{% endif %}
+    </div>
+  </div>
+</article>
+{% endblock %}

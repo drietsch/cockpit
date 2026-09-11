@@ -24,6 +24,7 @@ pub struct EnvironmentFingerprint {
 impl EnvironmentFingerprint {
     /// Build ids from the fingerprint: the class hashes only the comparability subset, the
     /// environment id hashes everything.
+    #[allow(clippy::too_many_arguments)]
     pub fn build(
         os: Option<String>,
         arch: Option<String>,

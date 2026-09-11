@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-h"><h1>Features</h1><span class="muted">{{ table.total }} of {{ shell.counts.features }}</span></div>
+{% include "fragments/features_table.html" %}
+{% endblock %}

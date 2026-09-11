@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block main %}
+<section class="hero">
+  <div class="hero__main">
+    <div class="hero__state">{{ m.status(shell.overall) }}<h1>{{ shell.headline }}</h1></div>
+    <div class="sec hero__sub">
+      <span class="mono">{{ shell.counts.healthy }}</span> healthy · <span class="mono">{{ shell.counts.attention }}</span> attention · <span class="mono">{{ shell.counts.broken }}</span> broken · <span class="mono">{{ shell.counts.unknown }}</span> unknown
+      &nbsp;·&nbsp; <span class="mono">{{ shell.counts.commits | number }}</span> commits
+    </div>
+  </div>
+  <table class="metrics" aria-label="Summary">
+    <tr><td>Features</td><td class="mono"><a href="/features">{{ shell.counts.features }}</a> <span class="muted">evaluated</span></td><td class="mono r">{% if shell.counts.attention %}<a class="warn" href="/features?state=attention">{{ shell.counts.attention }} attention</a>{% endif %}{% if shell.counts.broken %} · <a class="bad" href="/features?state=broken">{{ shell.counts.broken }} broken</a>{% endif %}{% if shell.counts.unknown %} · <a class="unk" href="/features?state=unknown">{{ shell.counts.unknown }} unknown</a>{% endif %}</td></tr>
+    <tr><td>Tests</td>{% if shell.counts.tests %}<td class="mono"><a href="/tests">{{ shell.counts.tests_passed | number }}</a> <span class="muted">/ {{ shell.counts.tests | number }} pass</span></td><td class="mono r">{% if shell.counts.tests_failed %}<span class="bad">{{ shell.counts.tests_failed }} fail</span>{% endif %}{% if shell.counts.tests_flaky %} · <span class="warn">{{ shell.counts.tests_flaky }} flaky</span>{% endif %}</td>{% else %}<td class="muted" colspan="2">no test evidence yet</td>{% endif %}</tr>
+    <tr><td>Performance</td>{% if shell.counts.benchmarks %}<td class="mono"><a href="/performance">{{ shell.counts.benchmarks }}</a> <span class="muted">metrics</span></td><td class="mono r">{% if shell.counts.benchmark_regressions %}<span class="warn">{{ shell.counts.benchmark_regressions }} regression{{ shell.counts.benchmark_regressions | plural('', 's') }}</span>{% endif %}</td>{% else %}<td class="muted" colspan="2">no benchmark evidence yet</td>{% endif %}</tr>
+    <tr><td>ADRs</td><td class="mono"><a href="/adrs">{{ shell.counts.adrs }}</a> <span class="muted">· {{ shell.counts.adrs_accepted }} accepted · {{ shell.counts.adrs_proposed }} proposed</span></td><td class="mono r"></td></tr>
+  </table>
+</section>
+
+<section class="grid-7-5">
+  <div id="ov-attention" data-live="attention">
+    {{ m.section('Needs attention', '/attention', 'All ' ~ shell.attention_count) }}
+    {% if attention %}
+    <table class="ledger">
+      {% for a in attention %}
+      <tr class="row-{{ a.state }}" data-href="{% if a.feature_id %}{{ url_for('feature', a.feature_id) }}{% else %}/status{% endif %}">
+        <td class="w-icon">{{ m.glyph(a.state) }}</td>
+        <td class="w-feature"><div class="t">{{ a.feature_title or a.subject }}</div>{% if a.feature_id %}<div class="muted mono xs">{{ a.feature_id }}</div>{% endif %}</td>
+        <td><div>{{ a.title }}</div><div class="muted xs">{{ a.summary }}</div></td>
+        <td class="w-strip">{{ m.strip(a.strip) }}</td>
+        <td class="r muted mono nowrap">{{ m.ago(a.first_seen) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<div class="empty empty--calm">Nothing needs attention.</div>{% endif %}
+  </div>
+  <div id="ov-changes" data-live="changes">
+    {{ m.section('Recent changes', '/changes', 'All ' ~ (shell.counts.commits | number)) }}
+    <table class="ledger">
+      {% for c in changes %}
+      <tr data-href="{{ url_for('commit', c.sha, c.repo) }}">
+        <td class="muted mono w-ago">{{ m.ago(c.at) }}</td>
+        <td class="mono w-sha">{% if shell.multi_repo %}<span class="repo-badge">{{ c.repo }}</span> {% endif %}{{ c.short }}</td>
+        <td><div class="t">{{ c.subject | truncate_chars(72) }}</div><div class="xs">{% for f in c.features %}<span class="chip{% if not f.explicit %} chip--inferred{% endif %}" title="{{ f.note }}">{{ f.title }}</span> {% endfor %}{% for a in c.adr_refs %}<span class="chip chip--adr">{{ a }}</span> {% endfor %}</div></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</section>
+
+<section id="ov-matrix" data-live="matrix">
+  {{ m.section('Feature matrix', '/features', 'All ' ~ shell.counts.features) }}
+  {% if matrix %}
+  {% include "fragments/_matrix_rows.html" %}
+  {% else %}
+  {{ m.empty('No feature definitions found', 'Cockpit looked for Markdown files with YAML frontmatter under the features directory. Add one with an id, title, status and paths, or run cockpit init.') }}
+  {% endif %}
+</section>
+{% endblock %}

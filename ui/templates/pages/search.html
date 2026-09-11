@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-h"><h1>Search</h1></div>
+<form class="filters" method="get" action="/search"><input type="search" name="q" value="{{ q }}" placeholder="Search features, ADRs, commits…" aria-label="Search" autofocus><button class="btn">Search</button></form>
+{% for g in groups %}<section>{{ m.section(g.kind) }}<table class="ledger">{% for h in g.hits %}<tr data-href="{{ h.url }}"><td class="mono w-sha">{{ h.id }}</td><td><a class="t" href="{{ h.url }}">{{ h.title }}</a></td><td class="muted xs">{{ h.subtitle }}</td></tr>{% endfor %}</table></section>{% else %}{% if q %}<div class="empty">No matches for “{{ q }}”.</div>{% endif %}{% endfor %}
+{% endblock %}

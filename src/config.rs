@@ -150,6 +150,8 @@ pub struct GitSection {
     pub implementation_paths_exclude: Vec<String>,
     pub max_commits: usize,
     pub dirty_check: bool,
+    /// Auto-discovered repositories to leave out (path globs relative to the root).
+    pub skip_repos: Vec<String>,
 }
 
 impl Default for GitSection {
@@ -165,6 +167,7 @@ impl Default for GitSection {
             ],
             max_commits: 20_000,
             dirty_check: true,
+            skip_repos: vec![],
         }
     }
 }
@@ -520,13 +523,9 @@ pub struct PolicyEvidence {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[derive(Default)]
 pub struct PolicyPerformance {
     pub require_comparable_baseline: bool,
-}
-impl Default for PolicyPerformance {
-    fn default() -> Self {
-        PolicyPerformance { require_comparable_baseline: false }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

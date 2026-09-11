@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-h"><h1>{{ section | capitalize }}</h1></div>
+{{ m.empty('Not in this build yet', 'The ' ~ section ~ ' view arrives with the evidence importers in the next milestone.') }}
+{% endblock %}

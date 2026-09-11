@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-h"><h1>Architecture decisions</h1><span class="muted">{{ rows | length }} of {{ counts.adrs }}</span></div>
+<form class="filters" method="get" action="/adrs">
+  <div class="chips" role="group" aria-label="Status">
+    {% for s in [['', 'All'], ['accepted', 'Accepted'], ['proposed', 'Proposed'], ['superseded', 'Superseded'], ['unknown', 'Unknown']] %}
+    <label class="chip-toggle{% if (s[0] == '' and not status) or status == s[0] %} is-on{% endif %}"><input type="radio" name="status" value="{{ s[0] }}"{% if (s[0] == '' and not status) or status == s[0] %} checked{% endif %} onchange="this.form.requestSubmit()">{{ s[1] }}</label>
+    {% endfor %}
+  </div>
+</form>
+<table class="ledger" data-keynav>
+  {% for a in rows %}
+  <tr data-href="{{ url_for('adr', a.id) }}">
+    <td class="mono w-sha">{{ a.id }}</td>
+    <td><a class="t" href="{{ url_for('adr', a.id) }}">{{ a.title }}</a>{% if a.evidence_notes %}<span class="muted xs"> · {{ a.evidence_notes | length }} evidence note{{ a.evidence_notes | length | plural('', 's') }}</span>{% endif %}</td>
+    <td class="nowrap">{{ m.status(a.status) }}{% if a.superseded_by %} <span class="muted xs">→ {{ a.superseded_by }}</span>{% endif %}</td>
+    <td class="xs">{% for f in a.features %}<a class="chip" href="{{ url_for('feature', f.id) }}">{{ m.glyph(f.state) }} {{ f.title }}</a> {% endfor %}</td>
+    <td class="r muted mono nowrap">{{ a.date or '' }}</td>
+    {% if shell.multi_repo %}<td class="muted xs">{{ a.repo }}</td>{% endif %}
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

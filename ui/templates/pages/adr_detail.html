@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block main %}
+<article class="detail">
+  <header class="detail__h">
+    <div class="detail__title"><h1>{{ a.title }}</h1>{{ m.idchip(a.id) }}</div>
+    <div class="detail__state">{{ m.status(a.status) }}{% if a.status_raw and a.status_raw | lower != a.status %}<span class="muted xs">“{{ a.status_raw | truncate_chars(90) }}”</span>{% endif %}</div>
+    <dl class="kv kv--inline">
+      {% if a.date %}<dt>Date</dt><dd>{{ a.date }}</dd>{% endif %}
+      {% if a.accepted_at %}<dt>Accepted</dt><dd>{{ a.accepted_at }}</dd>{% endif %}
+      {% if a.superseded_by %}<dt>Superseded by</dt><dd><a href="{{ url_for('adr', a.superseded_by) }}">{{ a.superseded_by }}</a></dd>{% endif %}
+      {% if a.supersedes %}<dt>Supersedes</dt><dd>{% for s in a.supersedes %}<a href="{{ url_for('adr', s) }}">{{ s }}</a> {% endfor %}</dd>{% endif %}
+      <dt>Source</dt><dd class="mono xs"><a href="{{ url_for('file', a.source, a.repo) }}">{{ a.source }}</a></dd>
+    </dl>
+  </header>
+  <div class="grid-7-5">
+    <div>
+      {% if toc | length >= 4 %}<nav class="toc" aria-label="Contents">{% for t in toc %}<a href="#{{ t.anchor }}">{{ t.heading }}</a>{% endfor %}</nav>{% endif %}
+      <section class="prose">{{ body_html }}</section>
+    </div>
+    <div>
+      <section>{{ m.section('Affected features') }}
+        {% if a.features %}<table class="ledger">{% for f in a.features %}<tr data-href="{{ url_for('feature', f.id) }}"><td class="w-icon">{{ m.glyph(f.state) }}</td><td><a class="t" href="{{ url_for('feature', f.id) }}">{{ f.title }}</a></td><td class="nowrap">{{ m.status(f.state) }}</td></tr>{% endfor %}</table>
+        {% else %}<div class="muted xs">No feature links this decision yet. Add it to a feature's <code>adrs:</code> list.</div>{% endif %}
+      </section>
+      {% if a.evidence_notes %}<section>{{ m.section('Evidence') }}<ul class="list">{% for e in a.evidence_notes %}<li><a href="#h-{{ e.heading | lower | replace(' ', '-') }}">{{ e.heading }}</a>{% if e.date %} <span class="muted xs">{{ e.date }}</span>{% endif %}</li>{% endfor %}</ul></section>{% endif %}
+      <section>{{ m.section('Commits citing this decision') }}
+        {% if citing %}<table class="ledger">{% for c in citing %}<tr data-href="{{ url_for('commit', c.sha, c.repo) }}"><td class="muted mono w-ago">{{ m.ago(c.at) }}</td><td class="mono w-sha">{{ c.short }}</td><td><span class="t">{{ c.subject | truncate_chars(60) }}</span></td></tr>{% endfor %}</table>
+        {% else %}<div class="muted xs">None.</div>{% endif %}
+      </section>
+    </div>
+  </div>
+</article>
+{% endblock %}

@@ -56,7 +56,7 @@ impl RepoIndex {
     pub fn new(repos: &[Repo]) -> Self {
         let mut entries: Vec<(RelPath, RepoId)> =
             repos.iter().map(|r| (r.path.clone(), r.id.clone())).collect();
-        entries.sort_by(|a, b| b.0.as_str().len().cmp(&a.0.as_str().len()));
+        entries.sort_by_key(|(p, _)| std::cmp::Reverse(p.as_str().len()));
         RepoIndex { entries }
     }
     pub fn repo_for(&self, path: &RelPath) -> Option<&RepoId> {

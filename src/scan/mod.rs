@@ -3,6 +3,7 @@
 
 pub mod classify;
 pub mod walk;
+pub mod watch;
 
 use crate::config::{Located, RepoSpec};
 use crate::git::{GitBackend, GitError};
@@ -99,22 +100,79 @@ impl<'a> Scanner<'a> {
         let mut warnings: Vec<ImportWarning> = Vec::new();
         let mut repo_notes = Vec::new();
 
-        // 1. Repositories.
+        // 1. Repositories: read git in parallel (independent subprocesses), then persist.
         self.emit(ScanProgress::Phase("git"));
-        store.batch_begin()?;
         let mut repos = discover_repos(self.located);
-        for repo in repos.iter_mut() {
-            let abs = repo.path.to_abs(&self.located.root);
-            match self.sync_repo(store, repo, &abs, now) {
-                Ok((total, new)) => {
-                    counts.commits += total;
-                    counts.new_commits += new;
-                }
-                Err(e) => {
+        let plans: Vec<RepoSyncPlan> = {
+            let store_ref: &Store = store;
+            let git = self.git;
+            let cfg = &self.located.config;
+            let root = &self.located.root;
+            let default_branch = cfg.project.primary_branch.clone();
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = repos
+                    .iter()
+                    .map(|repo| {
+                        let abs = repo.path.to_abs(root);
+                        let prev_head =
+                            store_ref.meta(&format!("repo_head:{}", repo.id)).ok().flatten();
+                        let known_count =
+                            store_ref.known_shas(&repo.id).map(|v| v.len()).unwrap_or(0);
+                        let repo_id = repo.id.clone();
+                        let primary =
+                            repo.primary_branch.clone().unwrap_or_else(|| default_branch.clone());
+                        scope.spawn(move || {
+                            read_repo(
+                                git,
+                                &abs,
+                                &repo_id,
+                                prev_head,
+                                known_count,
+                                cfg.git.max_commits,
+                                cfg.git.dirty_check,
+                                &primary,
+                            )
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| {
+                        h.join().unwrap_or_else(|_| RepoSyncPlan::failed("git thread panicked"))
+                    })
+                    .collect()
+            })
+        };
+        store.batch_begin()?;
+        for (repo, plan) in repos.iter_mut().zip(plans) {
+            match plan.error {
+                Some(e) => {
                     let note = format!("git sync failed: {e}");
                     tracing::warn!(repo = %repo.id, "{note}");
-                    repo.note = Some(note.clone());
-                    repo_notes.push((repo.id.clone(), note));
+                    repo.note = Some(note);
+                }
+                None => {
+                    if plan.rewritten {
+                        store.delete_commits_of_repo(&repo.id)?;
+                    }
+                    let prefix = repo.path.clone();
+                    for rc in &plan.commits {
+                        store.upsert_commit(&to_commit(&repo.id, &prefix, rc))?;
+                        counts.new_commits += 1;
+                    }
+                    if let Some(h) = &plan.head {
+                        store.set_meta(&format!("repo_head:{}", repo.id), &h.sha)?;
+                        repo.head = Some(RepoHead {
+                            sha: Sha::new(h.sha.clone()),
+                            branch: h.branch.clone(),
+                            dirty: h.dirty_files > 0,
+                            dirty_files: h.dirty_files,
+                            observed_at: now,
+                        });
+                    }
+                    repo.commit_count = plan.commit_count;
+                    repo.note = plan.note.clone();
+                    counts.commits += store.known_shas(&repo.id)?.len();
                 }
             }
             if let Some(n) = &repo.note {
@@ -318,69 +376,6 @@ impl<'a> Scanner<'a> {
         Ok(Some(out.warnings))
     }
 
-    /// Sync one repository's commits into the store. Returns (total commits known, new).
-    fn sync_repo(
-        &self,
-        store: &mut Store,
-        repo: &mut Repo,
-        abs: &Path,
-        now: Timestamp,
-    ) -> Result<(usize, usize)> {
-        let head = self.git.head(abs, self.located.config.git.dirty_check)?;
-        let Some(head) = head else {
-            repo.note = Some("0 commits, skipped".into());
-            repo.head = None;
-            return Ok((0, 0));
-        };
-        repo.commit_count = self.git.commit_count(abs)?;
-        let prev_head = store.meta(&format!("repo_head:{}", repo.id))?;
-        let known = store.known_shas(&repo.id)?;
-        let max = self.located.config.git.max_commits;
-        let prefix = repo.path.clone();
-        let mut new = 0usize;
-        let range;
-        let raw = if known.is_empty() || prev_head.is_none() {
-            self.git.log(abs, None, max)?
-        } else {
-            let prev = prev_head.unwrap();
-            if prev == head.sha {
-                vec![]
-            } else if self.git.is_ancestor(abs, &prev, &head.sha)? {
-                range = format!("{prev}..{}", head.sha);
-                self.git.log(abs, Some(&range), max)?
-            } else {
-                // History was rewritten: start over for this repo.
-                store.delete_commits_of_repo(&repo.id)?;
-                self.git.log(abs, None, max)?
-            }
-        };
-        if !raw.is_empty() {
-            for rc in &raw {
-                let commit = to_commit(&repo.id, &prefix, rc);
-                store.upsert_commit(&commit)?;
-                new += 1;
-            }
-        }
-        store.set_meta(&format!("repo_head:{}", repo.id), &head.sha)?;
-        repo.head = Some(RepoHead {
-            sha: Sha::new(head.sha.clone()),
-            branch: head.branch.clone(),
-            dirty: head.dirty_files > 0,
-            dirty_files: head.dirty_files,
-            observed_at: now,
-        });
-        if let (Some(b), Some(pb)) = (
-            &head.branch,
-            repo.primary_branch.as_deref().or(Some(&self.located.config.project.primary_branch)),
-        ) {
-            if b != pb {
-                repo.note = Some(format!("on branch {b}, not {pb}"));
-            }
-        }
-        let total = store.known_shas(&repo.id)?.len();
-        Ok((total, new))
-    }
-
     pub fn project(&self, repos: &[Repo]) -> Project {
         Project {
             id: self.located.project_id(),
@@ -406,6 +401,78 @@ impl<'a> Scanner<'a> {
             primary_branch: self.located.config.project.primary_branch.clone(),
         }
     }
+}
+
+/// What one repository's git read produced; applied to the store afterwards.
+struct RepoSyncPlan {
+    head: Option<crate::git::HeadInfo>,
+    commits: Vec<crate::git::RawCommit>,
+    commit_count: u64,
+    rewritten: bool,
+    note: Option<String>,
+    error: Option<String>,
+}
+
+impl RepoSyncPlan {
+    fn failed(msg: &str) -> Self {
+        RepoSyncPlan {
+            head: None,
+            commits: vec![],
+            commit_count: 0,
+            rewritten: false,
+            note: None,
+            error: Some(msg.into()),
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn read_repo(
+    git: &dyn GitBackend,
+    abs: &Path,
+    _repo_id: &RepoId,
+    prev_head: Option<String>,
+    known_count: usize,
+    max: usize,
+    dirty_check: bool,
+    primary_branch: &str,
+) -> RepoSyncPlan {
+    let head = match git.head(abs, dirty_check) {
+        Ok(Some(h)) => h,
+        Ok(None) => {
+            return RepoSyncPlan {
+                head: None,
+                commits: vec![],
+                commit_count: 0,
+                rewritten: false,
+                note: Some("0 commits, skipped".into()),
+                error: None,
+            };
+        }
+        Err(e) => return RepoSyncPlan::failed(&e.to_string()),
+    };
+    let commit_count = git.commit_count(abs).unwrap_or(0);
+    let mut rewritten = false;
+    let commits = match prev_head.filter(|_| known_count > 0) {
+        None => git.log(abs, None, max),
+        Some(prev) if prev == head.sha => Ok(vec![]),
+        Some(prev) if git.is_ancestor(abs, &prev, &head.sha).unwrap_or(false) => {
+            git.log(abs, Some(&format!("{prev}..{}", head.sha)), max)
+        }
+        Some(_) => {
+            rewritten = true;
+            git.log(abs, None, max)
+        }
+    };
+    let commits = match commits {
+        Ok(c) => c,
+        Err(e) => return RepoSyncPlan::failed(&e.to_string()),
+    };
+    let note = match &head.branch {
+        Some(b) if b != primary_branch => Some(format!("on branch {b}, not {primary_branch}")),
+        _ => None,
+    };
+    RepoSyncPlan { head: Some(head), commits, commit_count, rewritten, note, error: None }
 }
 
 fn to_commit(repo: &RepoId, prefix: &RelPath, rc: &crate::git::RawCommit) -> Commit {
@@ -498,6 +565,14 @@ pub fn discover_repos(located: &Located) -> Vec<Repo> {
             }
         }
     }
+    let skip: Vec<globset::GlobMatcher> = located
+        .config
+        .git
+        .skip_repos
+        .iter()
+        .filter_map(|g| globset::Glob::new(g).ok().map(|g| g.compile_matcher()))
+        .collect();
+    found.retain(|r| !skip.iter().any(|m| m.is_match(r.path.as_str())));
     found.sort_by(|a, b| a.path.as_str().cmp(b.path.as_str()));
     // Disambiguate ids that collide (two `plugin-x` dirs at different depths).
     let mut ids: HashSet<String> = HashSet::new();

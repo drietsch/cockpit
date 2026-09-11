@@ -1,0 +1,12 @@
+<header class="topbar">
+  <nav id="breadcrumbs" class="crumbs" aria-label="Breadcrumb">{{ page_title }}</nav>
+  <div class="topbar__spacer"></div>
+  <div id="topbar-status" class="topbar__status">
+    {% set active = shell.project.repos | selectattr("head") | list %}
+    {% for r in active[:3] %}<span class="mono sec">{% if shell.multi_repo %}{{ r.id }} {% endif %}{{ r.head.branch or 'detached' }} · {{ r.head.sha | short_sha }}{% if r.head.dirty %} · <span class="warn">dirty</span>{% else %} · clean{% endif %}</span>{% if not loop.last %}<span class="muted"> · </span>{% endif %}{% endfor %}{% if active | length > 3 %}<span class="muted"> · +{{ active | length - 3 }} repos</span>{% endif %}
+    <span id="updated-at" class="muted" data-live-status>{% if shell.last_scan_at %}Updated <time datetime="{{ shell.last_scan_at }}" data-rel>{{ shell.last_scan_at | ago }}</time>{% else %}Not scanned{% endif %}</span>
+    <span id="live-dot" class="live-dot" title="Live updates" aria-hidden="true"></span>
+  </div>
+  <button class="search-btn" type="button" data-palette-open aria-label="Search (Cmd/Ctrl+K)"><span>Search or jump to…</span><kbd>⌘K</kbd></button>
+  <button class="icon-btn" type="button" data-theme-toggle aria-label="Toggle theme">{{ m.icon('sun') }}</button>
+</header>

@@ -191,7 +191,7 @@ impl AdrId {
         let digits: String = {
             let lower = t.to_ascii_lowercase();
             let rest = lower.strip_prefix("adr").unwrap_or(&lower);
-            let rest = rest.trim_start_matches(|c: char| c == '-' || c == ' ' || c == '_');
+            let rest = rest.trim_start_matches(['-', ' ', '_']);
             rest.chars().take_while(|c| c.is_ascii_digit()).collect()
         };
         if digits.is_empty() {

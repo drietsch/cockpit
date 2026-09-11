@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-h"><h1>Scanning project…</h1></div>
+<dl class="kv" data-scan-progress>
+  <dt>Features</dt><dd class="mono" data-scan-count="features">…</dd>
+  <dt>ADRs</dt><dd class="mono" data-scan-count="adrs">…</dd>
+  <dt>Tests</dt><dd class="mono" data-scan-count="tests">…</dd>
+  <dt>Benchmarks</dt><dd class="mono" data-scan-count="benchmarks">…</dd>
+  <dt>Git commits</dt><dd class="mono" data-scan-count="commits">…</dd>
+</dl>
+{% endblock %}

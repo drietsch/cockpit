@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-h"><h1>Changes</h1><span class="muted">{{ rows | length }} of {{ total | number }} commits{% if feature %} · affecting <a href="{{ url_for('feature', feature) }}">{{ feature }}</a>{% endif %}</span></div>
+<form class="filters" method="get" action="/changes">
+  {% if repos | length > 1 %}<select name="repo" aria-label="Repository" onchange="this.form.requestSubmit()"><option value="">All repositories</option>{% for r in repos %}<option value="{{ r }}"{% if repo == r %} selected{% endif %}>{{ r }}</option>{% endfor %}</select>{% endif %}
+  {% if feature %}<input type="hidden" name="feature" value="{{ feature }}">{% endif %}
+  <noscript><button class="btn">Apply</button></noscript>
+</form>
+<table class="ledger" data-keynav>
+  {% for c in rows %}
+  <tr data-href="{{ url_for('commit', c.sha, c.repo) }}">
+    <td class="muted mono w-ago">{{ m.ago(c.at) }}</td>
+    <td class="mono w-sha">{% if shell.multi_repo %}<span class="repo-badge">{{ c.repo }}</span> {% endif %}{{ c.short }}</td>
+    <td><div class="t">{{ c.subject }}</div><div class="xs">{% for f in c.features %}<a class="chip{% if not f.explicit %} chip--inferred{% endif %}" href="{{ url_for('feature', f.id) }}" title="{{ f.note }}">{{ m.glyph(f.state) }} {{ f.title }}</a> {% endfor %}{% for a in c.adr_refs %}<a class="chip chip--adr" href="{{ url_for('adr', a) }}">{{ a }}</a> {% endfor %}{% for t in c.tags %}<span class="chip chip--tag">{{ t }}</span> {% endfor %}</div></td>
+    <td class="r muted xs nowrap">{{ c.author }}</td>
+    <td class="r mono xs nowrap"><span class="ok">+{{ c.added }}</span> <span class="bad">−{{ c.deleted }}</span></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

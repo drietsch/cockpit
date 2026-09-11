@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-h"><h1>Status</h1><span class="muted">generation {{ shell.generation }}{% if last_scan_duration_ms %} · last scan {{ last_scan_duration_ms | duration }}{% endif %}</span></div>
+<section>{{ m.section('Repositories') }}
+<table class="ledger">{% for r in repos %}<tr><td class="mono w-sha">{{ r.id }}</td><td class="mono xs muted">{{ r.path or '.' }}</td><td class="mono">{% if r.head %}{{ r.head.branch or 'detached' }} · {{ r.head.sha | short_sha }}{% if r.head.dirty %} · <span class="warn">dirty ({{ r.head.dirty_files }})</span>{% else %} · clean{% endif %}{% else %}<span class="muted">no commits</span>{% endif %}</td><td class="r mono">{{ r.commit_count | number }}</td><td class="muted xs">{{ r.note or '' }}</td></tr>{% endfor %}</table>
+</section>
+<section>{{ m.section('Evidence sources') }}
+<table class="ledger">{% for s in sources %}<tr><td class="mono w-sha">{{ s.id }}</td><td class="xs">{{ s.format }} · {{ s.kind }}{% if s.component %} · {{ s.component }}{% endif %}</td><td class="mono xs muted">{{ s.patterns | join(', ') }}</td><td class="xs">{% if not s.enabled %}<span class="muted">disabled</span>{% endif %}{% if s.github %}<span class="muted">github: {{ s.github }}</span>{% endif %}</td><td class="muted xs">{{ s.note or '' }}</td></tr>{% endfor %}</table>
+</section>
+<section id="warnings">{{ m.section('Import warnings') }}
+{% if warnings %}<table class="ledger">{% for w in warnings %}<tr class="row-{% if w.fatal %}broken{% else %}attention{% endif %}"><td class="w-icon">{{ m.glyph('broken' if w.fatal else 'attention') }}</td><td class="mono xs">{{ w.path }}</td><td>{{ w.message }}{% if w.location %} <span class="muted xs">({{ w.location }})</span>{% endif %}</td><td class="muted xs">{{ w.importer }}</td></tr>{% endfor %}</table>{% else %}<div class="muted xs">None.</div>{% endif %}
+</section>
+<section>{{ m.section('Unresolved references') }}
+{% if unresolved %}<table class="ledger">{% for u in unresolved %}<tr><td class="mono xs">{{ u.from.kind }} {{ u.from.id }}</td><td class="mono">{{ u.raw }}</td><td class="muted xs">{{ u.note or '' }}</td></tr>{% endfor %}</table>{% else %}<div class="muted xs">All references resolve.</div>{% endif %}
+</section>
+<section><button class="btn" type="button" data-rescan>Rescan now</button> <span class="muted xs">root: <span class="mono">{{ root }}</span></span></section>
+{% endblock %}

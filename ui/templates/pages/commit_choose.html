@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-h"><h1>Which commit?</h1><span class="muted">{{ sha }} matches several commits</span></div>
+<table class="ledger">{% for c in choices %}<tr data-href="{{ url_for('commit', c.sha, c.repo) }}"><td class="mono w-sha"><span class="repo-badge">{{ c.repo }}</span> {{ c.short }}</td><td>{{ c.subject }}</td><td class="r muted">{{ m.ago(c.at) }}</td></tr>{% endfor %}</table>
+{% endblock %}

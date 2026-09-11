@@ -1,0 +1,1 @@
+{% if shell.warnings_count > 0 %}<div class="banner" role="status" data-banner="{{ shell.warnings_count }}">Project loaded with {{ shell.warnings_count }} import warning{{ shell.warnings_count | plural('', 's') }} — <a href="/status#warnings">View</a><button type="button" class="banner__close" data-banner-dismiss aria-label="Dismiss">×</button></div>{% endif %}

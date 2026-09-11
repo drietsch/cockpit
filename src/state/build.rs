@@ -106,7 +106,10 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
         let mut adr_refs: Vec<AdrId> = Vec::new();
         for m in adr_re.captures_iter(&text) {
             if let Ok(n) = m[1].parse::<u32>() {
-                adr_citations.entry(n).or_default().push(c.key.clone());
+                let e = adr_citations.entry(n).or_default();
+                if !e.contains(&c.key) {
+                    e.push(c.key.clone());
+                }
                 let id = AdrId::new(format!("ADR-{}", &m[1]));
                 if !adr_refs.contains(&id) {
                     adr_refs.push(id);
@@ -273,7 +276,7 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
     let mut feature_views: BTreeMap<FeatureId, FeatureView> = BTreeMap::new();
     for f in features {
         let mut links = feature_commits.remove(&f.id).unwrap_or_default();
-        links.sort_by(|a, b| b.committed_at.cmp(&a.committed_at));
+        links.sort_by_key(|l| std::cmp::Reverse(l.committed_at));
         links.truncate(200);
         let impl_commit = impl_candidates.remove(&f.id).and_then(|c| {
             graph

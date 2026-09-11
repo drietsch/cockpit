@@ -1,0 +1,21 @@
+{% macro icon(name) %}<svg class="i" aria-hidden="true"><use href="#i-{{ name }}"/></svg>{% endmacro %}
+
+{# Full status: icon + label + colour, never colour alone. #}
+{% macro status(state) %}{% set s = status_icon(state) %}<span class="status status--{{ s.class }}">{{ icon(s.icon) }}<span class="status__label">{{ status_label(state) }}</span></span>{% endmacro %}
+
+{# Compact cell glyph with screen-reader text and tooltip. #}
+{% macro glyph(state, tip=none) %}{% set s = status_icon(state) %}<span class="glyph glyph--{{ s.class }}"{% if tip %} data-tip="{{ tip }}"{% endif %}>{{ icon(s.icon) }}<span class="sr-only">{{ status_label(state) }}</span></span>{% endmacro %}
+
+{% macro strip(items) %}<span class="strip">{% for it in items %}<span class="strip__k">{{ it.label }} {{ glyph(it.status) }}</span>{% endfor %}</span>{% endmacro %}
+
+{% macro feature_ref(id, title, state=none) %}<a class="ref ref--feature" href="{{ url_for('feature', id) }}">{% if state %}{{ glyph(state) }} {% endif %}<span>{{ title or id }}</span></a>{% endmacro %}
+
+{% macro commit_ref(repo, sha, subject=none, multi=false) %}<a class="ref ref--commit mono" href="{{ url_for('commit', sha, repo) }}"{% if subject %} title="{{ subject }}"{% endif %}>{% if multi %}<span class="repo-badge">{{ repo }}</span> {% endif %}{{ sha | short_sha }}</a>{% endmacro %}
+
+{% macro idchip(id) %}<span class="idchip mono">{{ id }}<button type="button" class="idchip__copy" data-copy="{{ id }}" aria-label="Copy {{ id }}">{{ icon('copy') }}</button></span>{% endmacro %}
+
+{% macro ago(ts) %}{% if ts %}<time datetime="{{ ts }}" data-rel title="{{ ts | datetime('long') }}">{{ ts | ago }}</time>{% else %}<span class="muted">—</span>{% endif %}{% endmacro %}
+
+{% macro section(title, more=none, more_label=none, id=none) %}<div class="section__h"{% if id %} id="{{ id }}"{% endif %}><h2>{{ title }}</h2>{% if more %}<a class="more" href="{{ more }}">{{ more_label or 'All' }} →</a>{% endif %}</div>{% endmacro %}
+
+{% macro empty(title, text, sources=none) %}<div class="empty"><div class="empty__t">{{ title }}</div><div class="empty__x">{{ text }}</div>{% if sources %}<div class="empty__s">Configured sources:<ul>{% for s in sources %}<li class="mono">{{ s.id }} · {{ s.format }} · {{ s.patterns | join(', ') }}</li>{% endfor %}</ul></div>{% endif %}</div>{% endmacro %}

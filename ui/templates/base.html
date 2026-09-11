@@ -1,0 +1,40 @@
+{% import "components/macros.html" as m %}
+{%- if not partial -%}
+<!doctype html>
+<html lang="en" data-theme="{{ theme | default('dark') }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page_title }} · {{ shell.project.name }} · Cockpit</title>
+<link rel="stylesheet" href="{{ asset('css/tokens.css') }}">
+<link rel="stylesheet" href="{{ asset('css/app.css') }}">
+<script src="{{ asset('vendor/htmx.min.js') }}" defer></script>
+<script src="{{ asset('vendor/idiomorph-ext.min.js') }}" defer></script>
+<script type="module" src="{{ asset('js/app.js') }}"></script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%236ea8fe'/%3E%3C/svg%3E">
+</head>
+<body hx-boost="true" hx-target="#main" hx-swap="outerHTML show:window:top" hx-ext="morph">
+<a class="skip" href="#main">Skip to content</a>
+{% include "layout/_icons.html" %}
+<div class="app">
+{% include "layout/_sidebar.html" %}
+<div class="content">
+{% include "layout/_topbar.html" %}
+{% include "layout/_banner.html" %}
+{%- else -%}
+<title>{{ page_title }} · {{ shell.project.name }} · Cockpit</title>
+{%- endif %}
+<main id="main" class="main main--{{ nav or 'page' }}" hx-history-elt tabindex="-1"{% if entity_id %} data-entity-id="{{ entity_id }}"{% endif %}>
+{% block main %}{% endblock %}
+</main>
+{%- if partial -%}
+{% include "layout/_oob.html" %}
+{%- else -%}
+</div>
+</div>
+{% include "layout/_palette.html" %}
+<div id="a11y-announcer" class="sr-only" aria-live="polite"></div>
+<div id="toasts" class="toasts" role="status"></div>
+</body>
+</html>
+{%- endif %}

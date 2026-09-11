@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-h"><h1>Attention</h1><span class="muted">{{ rows | length }} open{% if info_count and not show_info %} · <a href="/attention?include=informational">show {{ info_count }} informational</a>{% endif %}</span></div>
+{% if rows %}
+<table class="ledger" data-keynav>
+  {% for a in rows %}
+  <tr class="row-{{ a.state }}" id="{{ a.id }}" data-href="{% if a.feature_id %}{{ url_for('feature', a.feature_id) }}{% else %}/status{% endif %}">
+    <td class="w-icon">{{ m.glyph(a.state) }}</td>
+    <td class="w-feature"><div class="t">{{ a.feature_title or a.subject }}</div>{% if a.feature_id %}<div class="muted mono xs">{{ a.feature_id }}</div>{% endif %}</td>
+    <td><div>{{ a.title }} <span class="sev sev--{{ a.severity }}">{{ a.severity }}</span></div><div class="muted xs">{{ a.summary }}</div><div class="muted xs">{{ a.why }}</div></td>
+    <td class="w-strip">{{ m.strip(a.strip) }}</td>
+    <td class="r muted mono nowrap">{{ m.ago(a.first_seen) }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<div class="empty empty--calm">Nothing needs attention.</div>{% endif %}
+{% endblock %}

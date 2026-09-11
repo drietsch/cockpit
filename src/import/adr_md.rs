@@ -25,7 +25,7 @@ static FILE_NUM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d{1,6})[-
 static STATUS_BOLD_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\*\*Status:?\*\*:?\s*(.+)").unwrap());
 static STATUS_INLINE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\*\*(\d{4}-\d{2}-\d{2})\s*·.*?status:\s*([A-Za-z]+)").unwrap()
+    Regex::new(r"(?i)\*\*(\d{4}-\d{2}-\d{2})[^*]*?status:\s*([A-Za-z]+)").unwrap()
 });
 static STATUS_PLAIN_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)^\s*-?\s*status:\s*(.+)$").unwrap());
@@ -47,7 +47,7 @@ impl Importer for AdrMdImporter {
         ImporterKind::AdrMd
     }
     fn version(&self) -> u32 {
-        1
+        2
     }
     fn import(&self, ctx: &ImportContext, input: &ImportInput) -> ImportOutput {
         let mut out = ImportOutput::default();
@@ -117,7 +117,17 @@ impl Importer for AdrMdImporter {
         let mut date: Option<jiff::civil::Date> = get_str("date").and_then(|d| parse_date(&d));
         if status_raw.is_none() {
             for (i, line) in window.iter().enumerate() {
-                if let Some(c) = STATUS_INLINE_RE.captures(line) {
+                // The paged inline form may wrap: test the paragraph (this line plus the
+                // following non-blank lines), not just the line.
+                let mut para = line.to_string();
+                for cont in window.iter().skip(i + 1).take(4) {
+                    if cont.trim().is_empty() {
+                        break;
+                    }
+                    para.push(' ');
+                    para.push_str(cont.trim());
+                }
+                if let Some(c) = STATUS_INLINE_RE.captures(&para) {
                     status_raw = Some(c[2].to_string());
                     if date.is_none() {
                         date = parse_date(&c[1]);
@@ -387,5 +397,45 @@ mod tests {
         assert_eq!(a.status, AdrStatus::Accepted);
         assert_eq!(a.feature_ids, vec![FeatureId::new("FEAT-1")]);
         assert_eq!(a.accepted_at.map(|d| d.to_string()), Some("2026-01-02".into()));
+    }
+}
+
+#[cfg(test)]
+mod real_file_tests {
+    use super::tests_support::run_file;
+    #[test]
+    fn paged_adr_013_if_present() {
+        let p = "/Users/drietsch/paged/thoughts/docs/paged/adr/013-in-frame-scenelayer.md";
+        if let Ok(text) = std::fs::read_to_string(p) {
+            let a = run_file("thoughts/docs/paged/adr/013-in-frame-scenelayer.md", &text);
+            assert_eq!(a.status, crate::model::AdrStatus::Accepted, "raw={:?}", a.status_raw);
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use super::super::feature_md::tests::{input, located, project};
+    use super::*;
+    use std::collections::HashSet;
+    pub(crate) fn run_file(rel: &str, text: &str) -> Adr {
+        let loc = located();
+        let proj = project();
+        let repos = super::super::RepoIndex::default();
+        let ids: HashSet<FeatureId> = HashSet::new();
+        let ctx = ImportContext {
+            located: &loc,
+            project: &proj,
+            repos: &repos,
+            feature_ids: &ids,
+            source: None,
+            source_id: None,
+            now: crate::time::parse_timestamp("2026-09-11T12:00:00Z").unwrap(),
+        };
+        let out = AdrMdImporter.import(&ctx, &input(rel, text));
+        match out.entities.into_iter().next() {
+            Some(ImportedEntity::Adr(a)) => a,
+            _ => panic!("no adr"),
+        }
     }
 }

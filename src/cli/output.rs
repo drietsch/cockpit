@@ -19,7 +19,7 @@ impl Format {
                 (if self.ascii { "WARN" } else { "⚠" }, "Needs attention", "33")
             }
             HealthState::Broken => (if self.ascii { "FAIL" } else { "✕" }, "Broken", "31"),
-            HealthState::Unknown => (if self.ascii { "?" } else { "?" }, "Unknown", "90"),
+            HealthState::Unknown => ("?", "Unknown", "90"),
         };
         self.paint(color, &format!("{g} {word}"))
     }

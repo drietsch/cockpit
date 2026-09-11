@@ -1,0 +1,25 @@
+<dialog id="palette" class="palette" aria-label="Command palette">
+  <form method="get" action="/search" class="palette__form" data-palette-form>
+    <input name="q" type="search" class="palette__input" placeholder="Search features, ADRs, commits… or type > for commands" autocomplete="off" data-palette-input>
+  </form>
+  <div class="palette__results" data-palette-results></div>
+  <div class="palette__foot muted"><kbd>↑↓</kbd> navigate · <kbd>↵</kbd> open · <kbd>esc</kbd> close</div>
+</dialog>
+<dialog id="shortcuts" class="dialog" aria-label="Keyboard shortcuts">
+  <h2>Keyboard shortcuts</h2>
+  <dl class="shortcuts">
+    <dt><kbd>/</kbd></dt><dd>search</dd>
+    <dt><kbd>⌘K</kbd></dt><dd>command palette</dd>
+    <dt><kbd>g</kbd> <kbd>o</kbd></dt><dd>overview</dd>
+    <dt><kbd>g</kbd> <kbd>a</kbd></dt><dd>attention</dd>
+    <dt><kbd>g</kbd> <kbd>f</kbd></dt><dd>features</dd>
+    <dt><kbd>g</kbd> <kbd>c</kbd></dt><dd>changes</dd>
+    <dt><kbd>g</kbd> <kbd>t</kbd></dt><dd>tests</dd>
+    <dt><kbd>g</kbd> <kbd>p</kbd></dt><dd>performance</dd>
+    <dt><kbd>g</kbd> <kbd>v</kbd></dt><dd>visual</dd>
+    <dt><kbd>j</kbd> / <kbd>k</kbd></dt><dd>next / previous row</dd>
+    <dt><kbd>↵</kbd></dt><dd>open</dd>
+    <dt><kbd>esc</kbd></dt><dd>close</dd>
+  </dl>
+  <form method="dialog"><button class="btn">Close</button></form>
+</dialog>

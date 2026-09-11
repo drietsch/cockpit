@@ -1,0 +1,21 @@
+<div class="table-wrap">
+<table class="ledger matrix" data-keynav>
+  <thead><tr>
+    <th class="w-icon"></th><th>Feature</th><th>State</th><th class="c">Unit</th><th class="c">Int</th><th class="c">E2E</th><th class="c">Visual</th><th class="c">Perf</th><th class="r">ADR</th><th class="r">Changed</th>
+    {% if shell.multi_repo %}<th>Repo</th>{% endif %}
+  </tr></thead>
+  <tbody>
+  {% for f in matrix %}
+  <tr class="row-{{ f.state }}" data-href="{{ url_for('feature', f.id) }}" data-id="{{ f.id }}">
+    <td class="w-icon">{{ m.glyph(f.state) }}</td>
+    <td><a class="t" href="{{ url_for('feature', f.id) }}">{{ f.title }}</a>{% if f.group %}<span class="muted xs"> · {{ f.group }}</span>{% endif %}<div class="muted mono xs">{{ f.id }}</div></td>
+    <td class="nowrap">{{ m.status(f.state) }}</td>
+    <td class="c">{{ m.glyph(f.unit) }}</td><td class="c">{{ m.glyph(f.integration) }}</td><td class="c">{{ m.glyph(f.e2e) }}</td><td class="c">{{ m.glyph(f.visual) }}</td><td class="c">{{ m.glyph(f.perf) }}</td>
+    <td class="r mono">{{ f.adrs or '' }}</td>
+    <td class="r mono muted nowrap">{{ m.ago(f.changed_at) }}</td>
+    {% if shell.multi_repo %}<td class="muted xs">{{ f.changed_repo or '' }}</td>{% endif %}
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

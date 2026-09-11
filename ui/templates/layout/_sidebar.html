@@ -1,0 +1,26 @@
+<aside class="sidebar" aria-label="Primary">
+  <a class="brand" href="/">
+    <span class="brand__mark" aria-hidden="true"></span>
+    <span class="brand__name">{{ shell.project.name }}</span>
+  </a>
+  <nav class="nav">
+    <a href="/" class="nav__item{% if nav == 'overview' %} is-on{% endif %}"><span>Overview</span></a>
+    <a href="/attention" class="nav__item{% if nav == 'attention' %} is-on{% endif %}"><span>Attention</span><span id="nav-attention-count" class="nav__count{% if shell.attention_count > 0 %} is-hot{% endif %}">{{ shell.attention_count }}</span></a>
+    <a href="/features" class="nav__item{% if nav == 'features' %} is-on{% endif %}"><span>Features</span><span class="nav__count">{{ shell.counts.features }}</span></a>
+    <a href="/changes" class="nav__item{% if nav == 'changes' %} is-on{% endif %}"><span>Changes</span><span class="nav__count">{{ shell.counts.commits | number }}</span></a>
+  </nav>
+  <div class="nav__h">Evidence</div>
+  <nav class="nav">
+    <a href="/tests" class="nav__item{% if nav == 'tests' %} is-on{% endif %}"><span>Tests</span><span class="nav__count">{{ shell.counts.tests | number }}</span></a>
+    <a href="/performance" class="nav__item{% if nav == 'performance' %} is-on{% endif %}"><span>Performance</span><span class="nav__count">{{ shell.counts.benchmarks }}</span></a>
+    <a href="/visual" class="nav__item{% if nav == 'visual' %} is-on{% endif %}"><span>Visual</span><span class="nav__count">{{ shell.counts.visuals }}</span></a>
+  </nav>
+  <div class="nav__h">Architecture</div>
+  <nav class="nav">
+    <a href="/adrs" class="nav__item{% if nav == 'adrs' %} is-on{% endif %}"><span>ADRs</span><span class="nav__count">{{ shell.counts.adrs }}</span></a>
+  </nav>
+  <div class="sidebar__foot">
+    <a href="/status" class="nav__item{% if nav == 'status' %} is-on{% endif %}"><span>Status</span>{% if shell.warnings_count > 0 %}<span class="nav__count is-warn">{{ shell.warnings_count }}</span>{% endif %}</a>
+    <div class="muted">cockpit {{ version }} · <kbd>?</kbd> shortcuts</div>
+  </div>
+</aside>

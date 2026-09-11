@@ -10,6 +10,9 @@ use jiff::Timestamp;
 use rusqlite::params;
 use std::collections::HashMap;
 
+/// (repo, sha, parents, committed_at)
+pub type GraphRow = (RepoId, Sha, Vec<Sha>, Timestamp);
+
 #[derive(Debug, Clone)]
 pub struct ScanFileInfo {
     pub mtime: Timestamp,
@@ -109,7 +112,7 @@ impl Store {
     }
 
     /// Compact ancestry data for every commit of every repo: (repo, sha, parents, committed_at).
-    pub fn commit_graph_rows(&self) -> Result<Vec<(RepoId, Sha, Vec<Sha>, Timestamp)>> {
+    pub fn commit_graph_rows(&self) -> Result<Vec<GraphRow>> {
         let commits: Vec<Commit> = load_json(self, "SELECT data_json FROM commits")?;
         Ok(commits
             .into_iter()
