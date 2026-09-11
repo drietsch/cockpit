@@ -9,6 +9,7 @@ pub mod feature_md;
 pub mod frontmatter;
 pub mod junit;
 pub mod markdown;
+pub mod playwright;
 pub mod provenance;
 pub mod results_json;
 pub mod sniff;
@@ -194,6 +195,9 @@ pub fn importer_for(kind: ImporterKind) -> Option<Box<dyn Importer>> {
         ImporterKind::FeatureMd => Some(Box::new(feature_md::FeatureMdImporter)),
         ImporterKind::AdrMd => Some(Box::new(adr_md::AdrMdImporter)),
         ImporterKind::Evidence(EvidenceFormat::Junit) => Some(Box::new(junit::JunitImporter)),
+        ImporterKind::Evidence(EvidenceFormat::Playwright) => {
+            Some(Box::new(playwright::PlaywrightImporter))
+        }
         ImporterKind::Evidence(
             f @ (EvidenceFormat::CockpitResults | EvidenceFormat::PagedResults),
         ) => Some(Box::new(results_json::ResultsJsonImporter { format: f })),
