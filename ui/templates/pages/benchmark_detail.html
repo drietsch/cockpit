@@ -88,7 +88,7 @@
   {% elif tab == 'environment' %}
   <section>
     {% if env_rows %}
-    <table class="kv-table"><thead><tr><th></th><th>Current</th><th>Baseline</th></tr></thead>{% for r in env_rows %}<tr class="{% if r.differs %}row-attention{% endif %}"><td class="kv-k mono xs">{{ r.key }}{% if r.comparability %} <span class="muted" title="part of the comparability class">·</span>{% endif %}</td><td class="mono xs">{{ r.current }}</td><td class="mono xs muted">{{ r.baseline if r.baseline is not none else '—' }}</td></tr>{% endfor %}</table>
+    <table class="kv-table kv-table--env"><thead><tr><th></th><th>Current</th><th>Baseline</th></tr></thead>{% for r in env_rows %}<tr class="{% if r.differs %}row-attention{% endif %}"><td class="kv-k mono xs">{{ r.key }}{% if r.comparability %} <span class="muted" title="part of the comparability class">·</span>{% endif %}</td><td class="mono xs">{{ r.current }}</td><td class="mono xs muted">{{ r.baseline if r.baseline is not none else '—' }}</td></tr>{% endfor %}</table>
     <div class="muted xs" style="margin-top:6px">Rows marked · form the comparability class: two runs compare only when all of them match.</div>
     {% else %}<div class="empty empty--calm">No environment fingerprint recorded.</div>{% endif %}
   </section>

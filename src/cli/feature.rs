@@ -76,6 +76,16 @@ pub fn run(c: &Cockpit, id: &str, fmt: &Format) -> anyhow::Result<i32> {
             "attention": st.attention.iter().filter(|a| a.feature.as_ref() == Some(&v.feature.id)).map(|a| serde_json::json!({ "id": a.id, "severity": a.severity.as_str(), "reason": a.reason.as_str(), "title": a.title, "summary": a.summary, "first_seen": a.first_seen.to_string() })).collect::<Vec<_>>(),
             "recent_commits": v.commits.iter().take(10).map(|c| serde_json::json!({ "repo": c.key.repo, "sha": c.key.sha, "subject": st.commits.get(&c.key).map(|x| x.commit.subject.clone()), "at": c.committed_at.to_string(), "relation": c.origin.key(), "note": c.origin.note() })).collect::<Vec<_>>(),
             "tests": { "linked": v.tests.len(), "by_kind": tests_by_kind },
+            "benchmarks": v.benchmarks.iter().filter_map(|b| st.benchmarks.get(b)).map(|b| serde_json::json!({
+                "id": b.benchmark.id, "label": b.label(), "unit": b.benchmark.metric.unit,
+                "determinism": b.benchmark.metric.determinism.as_str(), "direction": b.benchmark.metric.direction.as_str(),
+                "value": b.latest.as_ref().map(|r| r.measurement.value),
+                "classification": b.comparison.as_ref().map(|c| c.classification.as_str()),
+                "severity": b.comparison.as_ref().map(|c| c.severity.as_str()),
+                "relative_change": b.comparison.as_ref().and_then(|c| c.relative_change),
+                "baseline_value": b.comparison.as_ref().and_then(|c| c.baseline_value),
+                "environment": b.environment_label, "note": b.comparison.as_ref().map(|c| c.note.clone()),
+            })).collect::<Vec<_>>(),
             "links": { "html": format!("/features/{}", v.feature.id), "api": format!("/api/v1/features/{}", v.feature.id) },
         });
         fmt.json_out("cockpit.feature.v1", &st.project, data);
