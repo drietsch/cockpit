@@ -307,10 +307,30 @@ impl<'a> Scanner<'a> {
             pattern_slots.push(slots);
         }
         let matched = glob_many(&self.located.root, &rel_patterns);
+        // A split target reads nothing its parent already reads: the parent routes the
+        // packages, the target's own paths are for artifacts pulled under its own id.
+        let parent_of: std::collections::HashMap<String, usize> = sources
+            .iter()
+            .enumerate()
+            .flat_map(|(i, s)| s.split.iter().map(move |sp| (sp.id.clone(), i)))
+            .collect();
+        let files_of = |i: usize| -> Vec<std::path::PathBuf> {
+            let mut v = Vec::new();
+            for k in pattern_slots[i].iter().flatten() {
+                v.extend(matched[*k].iter().cloned());
+            }
+            v
+        };
         for (i, src) in sources.iter().enumerate() {
             if !src.enabled {
                 continue;
             }
+            let parent_files: Vec<std::path::PathBuf> = src
+                .id
+                .as_deref()
+                .and_then(|id| parent_of.get(id))
+                .map(|j| files_of(*j))
+                .unwrap_or_default();
             let source_id = SourceId::new(
                 src.id.clone().unwrap_or_else(|| format!("auto:{}:{i}", src.format.as_str())),
             );
@@ -338,6 +358,7 @@ impl<'a> Scanner<'a> {
             }
             files.sort();
             files.dedup();
+            files.retain(|f| !parent_files.contains(f));
             for abs in &files {
                 if let Some(w) = self.import_evidence(
                     store,

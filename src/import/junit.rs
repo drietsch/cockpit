@@ -26,7 +26,7 @@ impl Importer for JunitImporter {
         ImporterKind::Evidence(EvidenceFormat::Junit)
     }
     fn version(&self) -> u32 {
-        3
+        4
     }
     fn import(&self, ctx: &ImportContext, input: &ImportInput) -> ImportOutput {
         let mut out = ImportOutput::default();
@@ -225,6 +225,56 @@ impl Importer for JunitImporter {
         });
         let default_kind =
             ctx.source.map(|s| TestKind::parse(s.default_kind())).unwrap_or(TestKind::Unit);
+        // `[[evidence.split]]`: cases of the named Cargo packages become their own batch under
+        // the split's source id (a workspace report that feeds two suites).
+        let splits: Vec<crate::config::SplitSpec> =
+            ctx.source.map(|s| s.split.clone()).unwrap_or_default();
+        let all_sources = ctx.located.evidence_sources();
+        for sp in &splits {
+            let (mine, rest): (Vec<RawResult>, Vec<RawResult>) =
+                results.into_iter().partition(|r| {
+                    r.classname
+                        .as_deref()
+                        .and_then(|c| c.split("::").next())
+                        .map(|pkg| sp.packages.iter().any(|p| p == pkg))
+                        .unwrap_or(false)
+                });
+            results = rest;
+            if mine.is_empty() {
+                continue;
+            }
+            let target = all_sources.iter().find(|s| s.id.as_deref() == Some(sp.id.as_str()));
+            let mut mine = mine;
+            if let Some(c) = &sp.component {
+                for r in mine.iter_mut() {
+                    r.component = Some(crate::ids::ComponentId::new(c.clone()));
+                }
+            }
+            let (batch, notes) = assemble(
+                ctx,
+                BatchSpec {
+                    format: EvidenceFormat::Junit,
+                    version: self.version(),
+                    suite_name: sp
+                        .suite
+                        .clone()
+                        .or_else(|| target.and_then(|t| t.suite.clone()))
+                        .unwrap_or_else(|| suite_name.clone()),
+                    default_kind: target
+                        .map(|t| TestKind::parse(t.default_kind()))
+                        .unwrap_or(default_kind),
+                    declared: decl.clone(),
+                    run_identity: None,
+                    results: mine,
+                    input,
+                    source_override: Some((crate::ids::SourceId::new(sp.id.clone()), target)),
+                },
+            );
+            for n in notes {
+                out.warn(&input.rel, NAME, n, None);
+            }
+            out.entities.push(ImportedEntity::TestBatch(batch));
+        }
         let (batch, notes) = assemble(
             ctx,
             BatchSpec {

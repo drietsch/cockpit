@@ -156,16 +156,20 @@ impl Store {
         load_json(self, "SELECT data_json FROM tests ORDER BY id")
     }
 
-    /// Newest run per evidence file (by completion time, then import order).
-    pub fn newest_run_per_path(&self) -> Result<HashMap<RelPath, RunId>> {
+    /// Newest run per (evidence file, source) — by completion time, then import order. One file
+    /// may feed several sources (`[[evidence.split]]`), each with its own newest run; a source
+    /// that re-reads a file under a new suite shape supersedes its older run of that file.
+    pub fn newest_run_per_path(&self) -> Result<HashMap<(RelPath, String), RunId>> {
         let mut stmt = self.conn.prepare(
-            "SELECT source_path, id FROM (SELECT source_path, id, ROW_NUMBER() OVER (PARTITION BY source_path ORDER BY finished_at DESC, imported_at DESC, rowid DESC) AS rn FROM runs) WHERE rn = 1",
+            "SELECT source_path, source_id, id FROM (SELECT source_path, source_id, id, ROW_NUMBER() OVER (PARTITION BY source_path, source_id ORDER BY finished_at DESC, imported_at DESC, rowid DESC) AS rn FROM runs) WHERE rn = 1",
         )?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })?;
         let mut out = HashMap::new();
         for row in rows {
-            let (p, id) = row?;
-            out.insert(RelPath::new(p), RunId::new(id));
+            let (p, suite, id) = row?;
+            out.insert((RelPath::new(p), suite), RunId::new(id));
         }
         Ok(out)
     }

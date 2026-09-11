@@ -270,9 +270,12 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
     // the matrix; the same goes for a suite whose report name changed.
     let all_runs = store.runs()?;
     let present_files = store.scan_files()?;
-    let newest_for_path: HashMap<crate::paths::RelPath, RunId> = store.newest_run_per_path()?;
-    let run_path: HashMap<RunId, crate::paths::RelPath> =
-        all_runs.iter().map(|r| (r.id.clone(), r.provenance.source_path.clone())).collect();
+    let newest_for_path: HashMap<(crate::paths::RelPath, String), RunId> =
+        store.newest_run_per_path()?;
+    let run_path: HashMap<RunId, (crate::paths::RelPath, String)> = all_runs
+        .iter()
+        .map(|r| (r.id.clone(), (r.provenance.source_path.clone(), r.source.as_str().to_string())))
+        .collect();
     let mut latest_run_of_test: HashMap<TestId, (Timestamp, RunId)> = HashMap::new();
     for tr in &recent_runs {
         let e = latest_run_of_test
@@ -282,13 +285,27 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
             *e = (tr.timestamp.value, tr.run.clone());
         }
     }
-    let is_current = |t: &Test| -> bool {
-        let Some((_, run)) = latest_run_of_test.get(&t.id) else { return false };
-        let Some(path) = run_path.get(run) else { return true };
-        if !present_files.contains_key(path) && !path.as_str().starts_with("external/") {
+    // Evidence from a source that is no longer configured is history, not state.
+    let configured_sources: HashSet<String> = input
+        .located
+        .evidence_sources()
+        .iter()
+        .enumerate()
+        .map(|(i, s)| s.id.clone().unwrap_or_else(|| format!("auto:{}:{i}", s.format.as_str())))
+        .collect();
+    let run_is_current = |run: &RunId| -> bool {
+        let Some(key) = run_path.get(run) else { return true };
+        if !configured_sources.contains(&key.1) {
             return false;
         }
-        newest_for_path.get(path).map(|newest| newest == run).unwrap_or(true)
+        if !present_files.contains_key(&key.0) && !key.0.as_str().starts_with("external/") {
+            return false;
+        }
+        newest_for_path.get(key).map(|newest| newest == run).unwrap_or(true)
+    };
+    let is_current = |t: &Test| -> bool {
+        let Some((_, run)) = latest_run_of_test.get(&t.id) else { return false };
+        run_is_current(run)
     };
     let tests_raw: Vec<Test> = tests_all.into_iter().filter(is_current).collect();
     let visuals_raw = store.recent_visuals()?;
@@ -398,6 +415,16 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
     let mut benchmarks: BTreeMap<BenchmarkId, BenchmarkView> = BTreeMap::new();
     let mut feature_benchmarks: HashMap<FeatureId, Vec<BenchmarkId>> = HashMap::new();
     for b in benchmarks_raw {
+        // Same currency rule as tests: the series is current while its newest run is the newest
+        // run of the file it came from (a renamed source leaves its old series in history).
+        let current = runs_by_bench
+            .get(&b.id)
+            .and_then(|rs| rs.iter().max_by_key(|r| (r.timestamp.value, r.id.clone())))
+            .map(|latest| run_is_current(&latest.run))
+            .unwrap_or(false);
+        if !current {
+            continue;
+        }
         let mut feats: Vec<(FeatureId, RelationOrigin)> = Vec::new();
         for raw in &b.declared_feature_ids {
             match idx.resolve(raw) {
@@ -602,18 +629,7 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
         .iter()
         .filter(|su| {
             suites_with_tests.contains(&su.id)
-                || su
-                    .last_run
-                    .as_ref()
-                    .map(|r| {
-                        run_path
-                            .get(r)
-                            .map(|p| {
-                                present_files.contains_key(p) && newest_for_path.get(p) == Some(r)
-                            })
-                            .unwrap_or(true)
-                    })
-                    .unwrap_or(false)
+                || su.last_run.as_ref().map(&run_is_current).unwrap_or(false)
         })
         .cloned()
         .collect();

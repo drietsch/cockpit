@@ -29,6 +29,9 @@ pub fn evaluate(
     let required = cfg.health.required_for(importance);
     let required_cats: Vec<EvidenceCategory> =
         required.iter().filter_map(|r| EvidenceCategory::parse(r)).collect();
+    // `test` (or `tests`, `any-test`) in required_evidence: any of unit / integration / e2e.
+    let require_any_test =
+        required.iter().any(|r| matches!(r.as_str(), "test" | "tests" | "any-test"));
     let broken_kinds: Vec<EvidenceCategory> = cfg
         .health
         .broken_on_failure_kinds
@@ -288,6 +291,37 @@ pub fn evaluate(
                     confidence = confidence.min(f.confidence);
                 }
             }
+        }
+        if require_any_test
+            && !evidence.rollups.iter().any(|r| {
+                matches!(
+                    r.category,
+                    EvidenceCategory::Unit | EvidenceCategory::Integration | EvidenceCategory::E2e
+                ) && !matches!(r.status, RollupStatus::Missing | RollupStatus::Silent)
+            })
+            && !matches!(feature.lifecycle, Lifecycle::Planned | Lifecycle::Retired)
+        {
+            reasons.push(HealthReason {
+                reason: AttentionReason::MissingRequiredTest,
+                severity: if feature.importance == Importance::Critical {
+                    Severity::High
+                } else {
+                    Severity::Medium
+                },
+                text: format!(
+                    "test evidence (unit, integration or e2e) is required for a {importance} feature but none is linked"
+                ),
+                evidence: vec![],
+                confidence: Confidence::High,
+                subject: "test".into(),
+                commit: None,
+                category: None,
+            });
+            chain.push(ExplainStep {
+                connective: "and".into(),
+                text: "test evidence is required but missing".into(),
+                refs: vec![],
+            });
         }
         // Partial revalidation: some kinds re-ran after the change, others did not.
         let fresh_kinds = evidence
