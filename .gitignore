@@ -1,0 +1,8 @@
+/target
+/.cockpit/
+*.sqlite
+*.sqlite-*
+.DS_Store
+/tests/fixtures/_generated/
+/perf/results/local-*.json
+/design/**/cockpit-*.html

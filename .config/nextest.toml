@@ -1,0 +1,8 @@
+# `cargo nextest run --profile ci` writes JUnit XML to target/nextest/ci/junit.xml, which
+# cockpit.toml registers as this project's own unit-evidence source (dogfooding).
+[profile.ci]
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"
+report-name = "cockpit-nextest"

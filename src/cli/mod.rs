@@ -1,0 +1,240 @@
+//! Command-line entry point. Exit codes: 0 ok · 1 policy/pull failure · 2 usage/config error ·
+//! 3 project not found · 4 index error.
+
+pub mod doctor;
+pub mod output;
+pub mod scan;
+pub mod serve;
+pub mod status;
+
+use crate::cockpit::{Cockpit, CockpitError};
+use crate::config::ConfigError;
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+
+pub const EXIT_OK: i32 = 0;
+pub const EXIT_POLICY: i32 = 1;
+pub const EXIT_USAGE: i32 = 2;
+pub const EXIT_NO_PROJECT: i32 = 3;
+pub const EXIT_INDEX: i32 = 4;
+
+#[derive(Parser, Debug)]
+#[command(name = "cockpit", version, about = "Local-first engineering cockpit for a repository")]
+pub struct Cli {
+    /// Project root or cockpit.toml (default: discovered from the current directory)
+    #[arg(short = 'C', long, global = true, env = "COCKPIT_PROJECT")]
+    pub project: Option<PathBuf>,
+    /// Machine-readable JSON on stdout
+    #[arg(long, global = true)]
+    pub json: bool,
+    /// Log level: error, warn, info, debug, trace
+    #[arg(long, global = true, env = "COCKPIT_LOG", default_value = "warn")]
+    pub log: String,
+    /// Disable colour
+    #[arg(long, global = true, env = "NO_COLOR")]
+    pub no_color: bool,
+    /// Replace status glyphs with ASCII words
+    #[arg(long, global = true, env = "COCKPIT_ASCII")]
+    pub ascii: bool,
+    /// Override the index path (default: .cockpit/index.sqlite beside the config)
+    #[arg(long, global = true)]
+    pub index: Option<PathBuf>,
+    #[command(subcommand)]
+    pub command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Scan the project and serve the web UI
+    Serve {
+        #[arg(long)]
+        watch: bool,
+        #[arg(long)]
+        port: Option<u16>,
+        #[arg(long)]
+        bind: Option<String>,
+        #[arg(long)]
+        open: bool,
+        /// Read templates and assets from ./ui on disk
+        #[arg(long)]
+        dev: bool,
+        #[arg(long)]
+        no_scan: bool,
+    },
+    /// Import project state into the index
+    Scan {
+        /// Re-import every file (history is kept)
+        #[arg(long)]
+        full: bool,
+        /// With --full: also drop run history
+        #[arg(long)]
+        reset_history: bool,
+    },
+    /// Terminal summary of the project state
+    Status {
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+    },
+    /// Check policies (references, required evidence, freshness, drift)
+    Validate {
+        #[arg(long)]
+        strict: bool,
+    },
+    /// Health, reasons and evidence for one feature
+    Feature { id: String },
+    /// Ranked attention items
+    Attention {
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Environment and project diagnostics
+    Doctor,
+    /// Scaffold cockpit.toml and docs/features
+    Init {
+        #[arg(long)]
+        from_cargo: bool,
+    },
+    /// Convert another state system into Cockpit conventions
+    Migrate {
+        #[command(subcommand)]
+        what: MigrateCommand,
+    },
+    /// Fetch the latest CI artifacts for configured evidence sources
+    Pull {
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        source: Vec<String>,
+    },
+    /// Structured query over project state
+    Query { expr: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum MigrateCommand {
+    /// Migrate a paged-media/state registry into feature Markdown + config
+    PagedState {
+        state_dir: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        config_out: Option<PathBuf>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+pub fn run() -> i32 {
+    let cli = Cli::parse();
+    init_logging(&cli.log);
+    let fmt = output::Format {
+        json: cli.json,
+        color: !cli.no_color && std::io::IsTerminal::is_terminal(&std::io::stdout()),
+        ascii: cli.ascii,
+    };
+    match dispatch(&cli, &fmt) {
+        Ok(code) => code,
+        Err(e) => {
+            let (code, kind) = classify(&e);
+            fmt.error(code, kind, &e.to_string());
+            code
+        }
+    }
+}
+
+fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
+    let cwd = std::env::current_dir()?;
+    match &cli.command {
+        Command::Scan { full, reset_history } => {
+            let mut c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
+            scan::run(&mut c, *full, *reset_history, fmt)
+        }
+        Command::Status { limit } => {
+            let mut c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
+            if c.store.meta("last_scan_at")?.is_none() {
+                c.scan(None)?;
+            }
+            status::run(&c, *limit, fmt)
+        }
+        Command::Doctor => {
+            let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
+            doctor::run(&c, fmt)
+        }
+        Command::Serve { watch, port, bind, open, dev, no_scan } => {
+            let mut c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
+            serve::run(
+                &mut c,
+                serve::Options {
+                    watch: *watch,
+                    port: *port,
+                    bind: bind.clone(),
+                    open: *open,
+                    dev: *dev,
+                    no_scan: *no_scan,
+                },
+                fmt,
+            )
+        }
+        Command::Migrate { what } => match what {
+            MigrateCommand::PagedState { state_dir, out, config_out, dry_run, force } => {
+                let located = crate::config::Config::discover(&cwd, cli.project.as_deref()).ok();
+                crate::migrate::paged_state::run(
+                    state_dir,
+                    out.as_deref(),
+                    config_out.as_deref(),
+                    located.as_ref(),
+                    *dry_run,
+                    *force,
+                    fmt,
+                )
+            }
+        },
+        Command::Validate { .. }
+        | Command::Feature { .. }
+        | Command::Attention { .. }
+        | Command::Init { .. }
+        | Command::Pull { .. }
+        | Command::Query { .. } => {
+            fmt.error(
+                EXIT_USAGE,
+                "not_implemented",
+                "this command is not implemented in this build yet (planned for a later milestone)",
+            );
+            Ok(EXIT_USAGE)
+        }
+    }
+}
+
+fn classify(e: &anyhow::Error) -> (i32, &'static str) {
+    if let Some(ce) = e.downcast_ref::<CockpitError>() {
+        return match ce {
+            CockpitError::Config(ConfigError::NotFound(_)) => (EXIT_NO_PROJECT, "no_project"),
+            CockpitError::Config(_) => (EXIT_USAGE, "config"),
+            CockpitError::Store(_) => (EXIT_INDEX, "index"),
+            CockpitError::Scan(_) => (EXIT_INDEX, "scan"),
+        };
+    }
+    if let Some(ce) = e.downcast_ref::<ConfigError>() {
+        return match ce {
+            ConfigError::NotFound(_) => (EXIT_NO_PROJECT, "no_project"),
+            _ => (EXIT_USAGE, "config"),
+        };
+    }
+    (EXIT_USAGE, "error")
+}
+
+fn init_logging(level: &str) {
+    use tracing_subscriber::EnvFilter;
+    let filter = std::env::var("RUST_LOG")
+        .ok()
+        .unwrap_or_else(|| format!("cockpit={level},project_cockpit={level},warn"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_new(filter).unwrap_or_else(|_| EnvFilter::new("warn")))
+        .with_writer(std::io::stderr)
+        .with_target(false)
+        .try_init();
+}

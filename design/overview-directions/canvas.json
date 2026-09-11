@@ -1,0 +1,17 @@
+{
+  "pages": [
+    { "id": "page-1", "name": "Overview" },
+    { "id": "page-2", "name": "Alternatives" }
+  ],
+  "artboards": [
+    { "file": "Main.dc.html", "title": "Overview — Engineering ledger", "x": 0, "y": 0, "w": 1440, "h": 900, "page": "page-1" },
+    { "file": "InstrumentPanel.dc.html", "title": "Alternative A — Instrument panel", "x": 0, "y": 0, "w": 1440, "h": 900, "page": "page-2" },
+    { "file": "Briefing.dc.html", "title": "Alternative C — Briefing", "x": 1540, "y": 0, "w": 1440, "h": 900, "page": "page-2" }
+  ],
+  "annotations": [
+    { "id": "note-b", "x": 0, "y": -150, "w": 560, "page": "page-1", "text": "Chosen direction (2026-09-11): Engineering ledger.\nTable-first and calm: sidebar with counts, one-line state, metrics as a 4-row table, attention / changes / matrix / perf as ledgers with hairline dividers and left status rails. Healthy is neutral; only problems carry color. DM Sans + JetBrains Mono, 30 px rows, graphite palette.\nThe Cockpit CSS tokens and MiniJinja templates are built against this board." },
+    { "id": "note-a", "x": 0, "y": -150, "w": 520, "page": "page-2", "text": "A · Instrument panel — not chosen. Kept for reference: the segmented state bar, mono readouts and 20-run strips may still be borrowed for the Feature Detail and Tests pages." },
+    { "id": "note-c", "x": 1540, "y": -150, "w": 520, "page": "page-2", "text": "C · Briefing — not chosen. Kept for reference: the one-sentence verdict and the prose 'why' cards inform the Overview headline and the Feature Detail 'Why?' chain." }
+  ],
+  "launch": { "view": "canvas", "page": "page-1" }
+}

@@ -1,0 +1,56 @@
+[package]
+name = "project-cockpit"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Local-first engineering cockpit: derives project state, attention and evidence from a repository"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/drietsch/cockpit"
+keywords = ["engineering", "dashboard", "testing", "benchmarks", "git"]
+categories = ["command-line-utilities", "development-tools"]
+default-run = "cockpit"
+
+[lib]
+name = "cockpit"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cockpit"
+path = "src/main.rs"
+
+[dependencies]
+aho-corasick = "1"
+anyhow = "1"
+arc-swap = "1"
+axum = { version = "0.8", features = ["macros"] }
+blake3 = "1"
+clap = { version = "4", features = ["derive", "env"] }
+comrak = "0.55"
+globset = "0.4"
+ignore = "0.4"
+indexmap = { version = "2", features = ["serde"] }
+jiff = { version = "0.2", features = ["serde"] }
+mime_guess = "2"
+minijinja = { version = "2", features = ["loader", "json", "builtins"] }
+regex = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+rust-embed = { version = "8", features = ["debug-embed"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync", "time"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+toml = "1"
+tower-http = { version = "0.7", features = ["compression-gzip", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+pretty_assertions = "1"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

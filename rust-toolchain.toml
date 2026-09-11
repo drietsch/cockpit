@@ -1,0 +1,6 @@
+# The compiler is a dependency of this project, so it is pinned rather than tracked: a lint that
+# ships in a newer stable must not turn CI red while the same clippy runs clean on an older
+# developer machine. Bumping this is a deliberate, reviewable change.
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy"]

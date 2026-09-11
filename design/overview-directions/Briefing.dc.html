@@ -1,0 +1,139 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; font-family: "Manrope", "Segoe UI", system-ui, sans-serif; background: #15161a; color: #e8e6e1; font-size: 14px; line-height: 1.5; }
+    a { color: #8fb4ff; text-decoration: none; } a:hover { color: #b3cbff; }
+    .serif { font-family: "Newsreader", Georgia, "Times New Roman", serif; }
+    .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+    .mut { color: #7a7d86; } .sec { color: #aeb0b8; }
+    .ok { color: #58b586; } .warn { color: #e2a83a; } .bad { color: #ee6a5f; } .unk { color: #8c9bb8; }
+    .nav a { display: block; padding: 5px 0; color: #7a7d86; font-size: 13px; }
+    .nav a.on { color: #e8e6e1; }
+    .nav .n { font-family: "JetBrains Mono", monospace; font-size: 11px; margin-left: 8px; color: #7a7d86; }
+    .nav .n.hot { color: #e2a83a; }
+    h2 { font-family: "Newsreader", Georgia, serif; font-weight: 500; font-size: 22px; margin: 0 0 12px; letter-spacing: -.01em; }
+    .card { padding: 14px 16px; border: 1px solid #262830; border-radius: 8px; background: #191b20; display: flex; flex-direction: column; gap: 6px; }
+    .card.bad { border-color: #4a2a28; } .card.warn { border-color: #4a3d22; }
+    .card .t { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+    .card .why { font-size: 13px; color: #aeb0b8; }
+    .card .ev { font-size: 12px; color: #7a7d86; display: flex; gap: 14px; }
+    .tl { display: grid; grid-template-columns: 52px 76px 1fr auto; gap: 0 14px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid #22242b; }
+    .pill { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid #2f323b; font-size: 11px; color: #aeb0b8; line-height: 18px; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th { text-align: left; font-weight: 500; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: #7a7d86; padding: 0 8px 6px; border-bottom: 1px solid #262830; }
+    td { padding: 0 8px; height: 30px; border-bottom: 1px solid #1f2127; white-space: nowrap; }
+    td.r, th.r { text-align: right; }
+    .g { font-family: "JetBrains Mono", monospace; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; background: #15161a; overflow: hidden; display: grid; grid-template-columns: 200px 1fr; gap: 0;">
+
+  <!-- text nav -->
+  <nav class="nav" style="padding: 28px 0 0 32px; border-right: 1px solid #22242b;">
+    <div style="font-weight: 700; font-size: 15px; margin-bottom: 18px;">Invoice App</div>
+    <a class="on" href="#">Overview</a>
+    <a href="#">Attention<span class="n hot">3</span></a>
+    <a href="#">Features<span class="n">44</span></a>
+    <a href="#">Changes<span class="n">17</span></a>
+    <div style="height: 14px;"></div>
+    <a href="#">Tests<span class="n">986</span></a>
+    <a href="#">Performance<span class="n">12</span></a>
+    <a href="#">Visual<span class="n">87</span></a>
+    <div style="height: 14px;"></div>
+    <a href="#">ADRs<span class="n">23</span></a>
+    <a href="#">Documents</a>
+    <div style="position: absolute; bottom: 24px; font-size: 12px; color: #7a7d86;">⌘K to search</div>
+  </nav>
+
+  <main style="padding: 28px 48px 0 48px; overflow: hidden; display: flex; flex-direction: column; gap: 28px; position: relative;">
+    <!-- meta line -->
+    <div class="mut" style="font-size: 12px; display: flex; gap: 18px;">
+      <span class="mono">main · a41f92c · clean</span><span>updated 34 seconds ago</span><span>17 commits since <span class="mono">v1.12.0</span></span>
+    </div>
+
+    <!-- headline -->
+    <section style="max-width: 980px;">
+      <div class="serif" style="font-size: 38px; line-height: 1.15; font-weight: 400; letter-spacing: -.015em;">
+        The app is broadly healthy.<br>
+        <span class="bad">PDF Export is broken</span>, <span class="warn">Search has regressed</span>, and <span class="warn">Permissions needs revalidation</span>.
+      </div>
+      <div class="sec" style="margin-top: 14px; font-size: 14px;">
+        37 features healthy · 2 need attention · 1 broken · 2 without evidence &nbsp;·&nbsp; 983 of 986 tests pass · 11 of 12 benchmarks inside budget · 86 of 87 visual baselines current
+      </div>
+    </section>
+
+    <!-- two columns -->
+    <section style="display: grid; grid-template-columns: 1.1fr 1fr; gap: 40px; align-items: start;">
+      <div>
+        <h2>What needs attention</h2>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div class="card bad">
+            <div class="t"><span class="bad">✕</span> PDF Export is broken <span class="mono mut" style="font-size: 11px; font-weight: 400;">FEAT-032</span></div>
+            <div class="why">An end-to-end test started failing after <span class="mono">02ac431</span> <em>Rework PDF layout engine</em>, seven hours ago. Unit tests and visual baselines still pass.</div>
+            <div class="ev"><span>E2E <span class="bad">1 failing</span></span><span>Unit <span class="ok">✓</span></span><span>Visual <span class="ok">✓</span></span><span>Perf <span class="ok">✓</span></span><span style="flex: 1;"></span><a href="#">Why? →</a></div>
+          </div>
+          <div class="card warn">
+            <div class="t"><span class="warn">⚠</span> Search is slower <span class="mono mut" style="font-size: 11px; font-weight: 400;">FEAT-019</span></div>
+            <div class="why">p95 latency rose from 112 ms to 132 ms (+18 %) after <span class="mono">a41f92c</span> <em>Replace search index</em>. Still inside the 150 ms budget; all tests are current.</div>
+            <div class="ev"><span>Perf <span class="warn">+18%</span></span><span>Unit <span class="ok">✓</span></span><span>E2E <span class="ok">✓</span></span><span>Visual <span class="ok">✓</span></span><span style="flex: 1;"></span><a href="#">Why? →</a></div>
+          </div>
+          <div class="card warn">
+            <div class="t"><span class="warn">↻</span> Permissions needs visual revalidation <span class="mono mut" style="font-size: 11px; font-weight: 400;">FEAT-027</span></div>
+            <div class="why">The implementation changed with <span class="mono">91b72ad</span> two days ago; the last visual run predates it. Everything that did run is green.</div>
+            <div class="ev"><span>Visual <span class="warn">stale</span></span><span>Unit <span class="ok">✓</span></span><span>E2E <span class="ok">✓</span></span><span>Perf <span class="ok">✓</span></span><span style="flex: 1;"></span><a href="#">Why? →</a></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <h2>What changed</h2>
+        <div class="tl"><span class="mono mut" style="font-size: 12px;">09:12</span><span class="mono" style="font-size: 12px;">a41f92c</span><span>Replace search index <span class="pill">Search</span></span><span class="warn" style="font-size: 12px;">⚠ perf regression</span></div>
+        <div class="tl"><span class="mono mut" style="font-size: 12px;">09:23</span><span class="mut" style="font-size: 12px;">benchmark</span><span class="sec">Search API p95 completed</span><span class="warn" style="font-size: 12px;">132 ms</span></div>
+        <div class="tl"><span class="mono mut" style="font-size: 12px;">06:41</span><span class="mono" style="font-size: 12px;">02ac431</span><span>Rework PDF layout engine <span class="pill">PDF Export</span></span><span class="bad" style="font-size: 12px;">✕ E2E failed</span></div>
+        <div class="tl"><span class="mono mut" style="font-size: 12px;">Tue</span><span class="mono" style="font-size: 12px;">91b72ad</span><span>Rotate refresh tokens <span class="pill">Password Reset</span> <span class="pill" style="border-style: dotted;">Permissions</span></span><span class="ok" style="font-size: 12px;">✓ validated</span></div>
+        <div class="tl"><span class="mono mut" style="font-size: 12px;">Mon</span><span class="mut" style="font-size: 12px;">ADR</span><span class="sec">ADR-022 <em>Inverted index for search</em> accepted</span><span class="mut" style="font-size: 12px;">Search</span></div>
+        <div class="tl" style="border-bottom: none;"><span class="mono mut" style="font-size: 12px;">Mon</span><span class="mono" style="font-size: 12px;">5c02e1a</span><span>Tighten invoice number validation <span class="pill">Billing</span></span><span class="ok" style="font-size: 12px;">✓ validated</span></div>
+        <div style="margin-top: 10px;"><a href="#" style="font-size: 13px;">All 17 changes since v1.12.0 →</a></div>
+      </div>
+    </section>
+
+    <!-- matrix + perf -->
+    <section style="display: grid; grid-template-columns: 1.1fr 1fr; gap: 40px; align-items: start;">
+      <div>
+        <h2>Where features stand</h2>
+        <table>
+          <tr><th>Feature</th><th>State</th><th>Unit</th><th>E2E</th><th>Visual</th><th>Perf</th><th class="r">Changed</th></tr>
+          <tr><td>PDF Export</td><td class="bad">✕ Broken</td><td class="g ok">✓</td><td class="g bad">✕</td><td class="g ok">✓</td><td class="g ok">✓</td><td class="r mono mut">7h</td></tr>
+          <tr><td>Search</td><td class="warn">⚠ Attention</td><td class="g ok">✓</td><td class="g ok">✓</td><td class="g ok">✓</td><td class="g warn">⚠</td><td class="r mono mut">4h</td></tr>
+          <tr><td>Permissions</td><td class="warn">↻ Attention</td><td class="g ok">✓</td><td class="g ok">✓</td><td class="g warn">↻</td><td class="g ok">✓</td><td class="r mono mut">3d</td></tr>
+          <tr><td>Audit Log</td><td class="unk">? Unknown</td><td class="g unk">?</td><td class="g unk">?</td><td class="g mut">—</td><td class="g mut">—</td><td class="r mono mut">21d</td></tr>
+          <tr><td>Authentication</td><td class="sec">✓ Healthy</td><td class="g ok">✓</td><td class="g ok">✓</td><td class="g ok">✓</td><td class="g ok">✓</td><td class="r mono mut">2d</td></tr>
+          <tr><td>Billing</td><td class="sec">✓ Healthy</td><td class="g ok">✓</td><td class="g ok">✓</td><td class="g ok">✓</td><td class="g ok">✓</td><td class="r mono mut">3d</td></tr>
+        </table>
+        <div style="margin-top: 10px;"><a href="#" style="font-size: 13px;">All 44 features →</a></div>
+      </div>
+      <div>
+        <h2>Performance</h2>
+        <table>
+          <tr><th>Benchmark</th><th class="r">Now</th><th class="r">Change</th><th class="r">Budget</th></tr>
+          <tr><td>Search API p95</td><td class="r mono">132 ms</td><td class="r mono warn">+18.0%</td><td class="r mono mut">150 ms</td></tr>
+          <tr><td>PDF render</td><td class="r mono">1.82 s</td><td class="r mono warn">+7.4%</td><td class="r mono mut">2 s</td></tr>
+          <tr><td>Auth middleware</td><td class="r mono">0.42 ms</td><td class="r mono sec">+1.1%</td><td class="r mono mut">1 ms</td></tr>
+          <tr><td>Serialization</td><td class="r mono">81 µs</td><td class="r mono ok">−6.2%</td><td class="r mono mut">100 µs</td></tr>
+        </table>
+        <div class="mut" style="margin-top: 10px; font-size: 12px;">Two benchmarks moved by more than the 10 % threshold; none breached its budget.</div>
+      </div>
+    </section>
+  </main>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; background: #0b0d11; color: #e3e6ea; font-size: 12px; line-height: 1.4; }
+    a { color: #7fb1ff; text-decoration: none; } a:hover { color: #a3c5ff; }
+    .m { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+    .lbl { font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #6a7382; }
+    .mut { color: #6a7382; } .sec { color: #9aa3b2; }
+    .ok { color: #45b37b; } .warn { color: #e6a730; } .bad { color: #f0574c; } .unk { color: #7f93b8; } .chg { color: #7fb1ff; }
+    .panel { border: 1px solid #23282f; background: #101318; }
+    .ph { display: flex; justify-content: space-between; align-items: center; height: 26px; padding: 0 10px; border-bottom: 1px solid #23282f; }
+    .rail a { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0; color: #6a7382; font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+    .rail a.on { color: #e3e6ea; background: #15191f; box-shadow: inset 2px 0 0 #7fb1ff; }
+    .rail .n { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: #9aa3b2; }
+    .rail .n.hot { color: #e6a730; }
+    .row { display: grid; align-items: center; height: 28px; padding: 0 10px; border-bottom: 1px solid #191d23; white-space: nowrap; }
+    .row.bad { box-shadow: inset 3px 0 0 #f0574c; } .row.warn { box-shadow: inset 3px 0 0 #e6a730; } .row.unk { box-shadow: inset 3px 0 0 #3c4656; }
+    .seg { display: flex; height: 8px; gap: 2px; }
+    .seg div { height: 8px; }
+    .readout { padding: 8px 10px; border-right: 1px solid #23282f; display: flex; flex-direction: column; gap: 4px; }
+    .readout .v { font-family: "IBM Plex Mono", monospace; font-size: 20px; font-weight: 500; line-height: 1; }
+    .readout .v small { font-size: 11px; color: #6a7382; font-weight: 400; }
+    .bar { height: 3px; background: #23282f; position: relative; }
+    .bar div { position: absolute; left: 0; top: 0; height: 3px; }
+    .glyph { font-family: "IBM Plex Mono", monospace; font-size: 11px; }
+    .runs { display: inline-flex; gap: 2px; vertical-align: middle; }
+    .runs i { display: inline-block; width: 6px; height: 12px; background: #2a5e42; }
+    .runs i.f { background: #a83c34; } .runs i.k { background: #8a6a1e; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; background: #0b0d11; overflow: hidden; background-image: linear-gradient(#0f1217 1px, transparent 1px), linear-gradient(90deg, #0f1217 1px, transparent 1px); background-size: 40px 40px;">
+
+  <!-- icon rail -->
+  <nav class="rail" style="width: 56px; flex: none; border-right: 1px solid #23282f; background: #0b0d11; display: flex; flex-direction: column;">
+    <div style="height: 40px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #23282f;"><div style="width: 16px; height: 16px; border: 2px solid #7fb1ff; border-radius: 50%;"></div></div>
+    <a class="on" href="#"><span class="n">◎</span>Home</a>
+    <a href="#"><span class="n hot">3</span>Attn</a>
+    <a href="#"><span class="n">44</span>Feat</a>
+    <a href="#"><span class="n">17</span>Chg</a>
+    <a href="#"><span class="n">986</span>Test</a>
+    <a href="#"><span class="n">12</span>Perf</a>
+    <a href="#"><span class="n">87</span>Vis</a>
+    <a href="#"><span class="n">23</span>ADR</a>
+  </nav>
+
+  <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+    <!-- topbar -->
+    <header style="height: 40px; flex: none; display: flex; align-items: center; gap: 18px; padding: 0 16px; border-bottom: 1px solid #23282f; background: #0b0d11;">
+      <div style="font-weight: 600; font-size: 13px;">INVOICE APP</div>
+      <div class="m sec">main</div>
+      <div class="m sec">a41f92c</div>
+      <div class="m ok">clean</div>
+      <div style="flex: 1;"></div>
+      <div class="lbl">scan <span class="m" style="color: #9aa3b2; letter-spacing: 0; text-transform: none;">34 s ago · 0.4 s</span></div>
+      <div class="lbl">live <span class="ok">●</span></div>
+      <div class="m mut" style="border: 1px solid #23282f; padding: 3px 8px;">⌘K</div>
+    </header>
+
+    <!-- state strip -->
+    <section class="panel" style="margin: 12px 16px 0; display: grid; grid-template-columns: 420px repeat(4, 1fr);">
+      <div style="padding: 10px 12px; border-right: 1px solid #23282f; display: flex; flex-direction: column; gap: 8px;">
+        <div class="lbl">Project state</div>
+        <div class="m" style="font-size: 22px; font-weight: 600; line-height: 1;"><span class="warn">⚠</span> 3 NEED ATTENTION</div>
+        <div class="seg"><div style="flex: 37; background: #2a5e42;"></div><div style="flex: 2; background: #e6a730;"></div><div style="flex: 1; background: #f0574c;"></div><div style="flex: 2; background: #3c4656;"></div></div>
+        <div class="m" style="font-size: 11px; color: #9aa3b2;"><span class="ok">37</span> healthy &nbsp;<span class="warn">2</span> attention &nbsp;<span class="bad">1</span> broken &nbsp;<span class="unk">2</span> unknown</div>
+      </div>
+      <div class="readout"><div class="lbl">Features</div><div class="v">42<small>/44</small></div><div class="bar"><div style="width: 95%; background: #45b37b;"></div></div><div class="m mut" style="font-size: 10px;"><span class="warn">2</span> attn <span class="bad">1</span> broken</div></div>
+      <div class="readout"><div class="lbl">Tests</div><div class="v">983<small>/986</small></div><div class="bar"><div style="width: 99%; background: #45b37b;"></div></div><div class="m mut" style="font-size: 10px;"><span class="bad">1</span> fail <span class="warn">2</span> flaky</div></div>
+      <div class="readout"><div class="lbl">Performance</div><div class="v">11<small>/12</small></div><div class="bar"><div style="width: 91%; background: #45b37b;"></div></div><div class="m mut" style="font-size: 10px;"><span class="warn">1</span> regression</div></div>
+      <div class="readout" style="border-right: none;"><div class="lbl">Visual</div><div class="v">86<small>/87</small></div><div class="bar"><div style="width: 98%; background: #45b37b;"></div></div><div class="m mut" style="font-size: 10px;"><span class="warn">1</span> stale</div></div>
+    </section>
+
+    <!-- three instruments -->
+    <section style="margin: 12px 16px 0; display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 12px;">
+      <div class="panel">
+        <div class="ph"><span class="lbl">Attention</span><a class="m" href="#" style="font-size: 11px;">3 open →</a></div>
+        <div class="row bad" style="grid-template-columns: 18px 120px 1fr 150px 32px;"><span class="glyph bad">✕</span><span>PDF Export</span><span class="sec">E2E regression · 1 failing after <span class="m">02ac431</span></span><span class="glyph"><span class="ok">U✓</span> <span class="bad">E✕</span> <span class="ok">V✓</span> <span class="ok">P✓</span></span><span class="m mut" style="text-align: right;">7h</span></div>
+        <div class="row warn" style="grid-template-columns: 18px 120px 1fr 150px 32px;"><span class="glyph warn">⚠</span><span>Search</span><span class="sec">p95 <span class="m">+18%</span> · 132/150 ms · after <span class="m">a41f92c</span></span><span class="glyph"><span class="ok">U✓</span> <span class="ok">E✓</span> <span class="ok">V✓</span> <span class="warn">P⚠</span></span><span class="m mut" style="text-align: right;">4h</span></div>
+        <div class="row warn" style="grid-template-columns: 18px 120px 1fr 150px 32px;"><span class="glyph warn">↻</span><span>Permissions</span><span class="sec">visual stale · before <span class="m">91b72ad</span></span><span class="glyph"><span class="ok">U✓</span> <span class="ok">E✓</span> <span class="warn">V↻</span> <span class="ok">P✓</span></span><span class="m mut" style="text-align: right;">3d</span></div>
+        <div class="row unk" style="grid-template-columns: 18px 120px 1fr 150px 32px;"><span class="glyph unk">?</span><span>Audit Log</span><span class="sec">no evidence · critical requires E2E</span><span class="glyph"><span class="unk">U?</span> <span class="unk">E?</span> <span class="mut">V—</span> <span class="mut">P—</span></span><span class="m mut" style="text-align: right;">21d</span></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><span class="lbl">Changes</span><a class="m" href="#" style="font-size: 11px;">17 since v1.12.0 →</a></div>
+        <div class="row" style="grid-template-columns: 28px 62px 1fr;"><span class="m mut">4h</span><span class="m chg">a41f92c</span><span>Replace search index <span class="m warn">P⚠</span></span></div>
+        <div class="row" style="grid-template-columns: 28px 62px 1fr;"><span class="m mut">7h</span><span class="m chg">02ac431</span><span>Rework PDF layout engine <span class="m bad">E✕</span></span></div>
+        <div class="row" style="grid-template-columns: 28px 62px 1fr;"><span class="m mut">2d</span><span class="m chg">91b72ad</span><span>Rotate refresh tokens <span class="m ok">✓</span></span></div>
+        <div class="row" style="grid-template-columns: 28px 62px 1fr;"><span class="m mut">3d</span><span class="m chg">5c02e1a</span><span>Tighten invoice validation <span class="m ok">✓</span></span></div>
+        <div class="row" style="grid-template-columns: 28px 62px 1fr;"><span class="m mut">3d</span><span class="m chg">c9d11f0</span><span>Bump tantivy <span class="m ok">✓</span></span></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><span class="lbl">Performance Δ</span><a class="m" href="#" style="font-size: 11px;">12 →</a></div>
+        <div class="row warn" style="grid-template-columns: 1fr 56px 54px 64px;"><span>Search p95</span><span class="m" style="text-align: right;">132 ms</span><span class="m warn" style="text-align: right;">+18.0%</span><svg viewBox="0 0 64 16" style="width: 56px; height: 14px; justify-self: end;"><polyline fill="none" stroke="#e6a730" stroke-width="1.5" points="2,12 12,11 22,11 32,10 42,10 52,9 62,3"/><line x1="0" y1="2" x2="64" y2="2" stroke="#f0574c" stroke-dasharray="2 2"/></svg></div>
+        <div class="row warn" style="grid-template-columns: 1fr 56px 54px 64px;"><span>PDF render</span><span class="m" style="text-align: right;">1.82 s</span><span class="m warn" style="text-align: right;">+7.4%</span><svg viewBox="0 0 64 16" style="width: 56px; height: 14px; justify-self: end;"><polyline fill="none" stroke="#e6a730" stroke-width="1.5" points="2,10 12,10 22,9 32,10 42,9 52,7 62,5"/></svg></div>
+        <div class="row" style="grid-template-columns: 1fr 56px 54px 64px;"><span>Auth middleware</span><span class="m" style="text-align: right;">0.42 ms</span><span class="m sec" style="text-align: right;">+1.1%</span><svg viewBox="0 0 64 16" style="width: 56px; height: 14px; justify-self: end;"><polyline fill="none" stroke="#6a7382" stroke-width="1.5" points="2,9 12,9 22,8 32,9 42,9 52,8 62,8"/></svg></div>
+        <div class="row" style="grid-template-columns: 1fr 56px 54px 64px;"><span>Serialization</span><span class="m" style="text-align: right;">81 µs</span><span class="m ok" style="text-align: right;">−6.2%</span><svg viewBox="0 0 64 16" style="width: 56px; height: 14px; justify-self: end;"><polyline fill="none" stroke="#45b37b" stroke-width="1.5" points="2,6 12,6 22,7 32,7 42,8 52,10 62,11"/></svg></div>
+        <div class="row" style="grid-template-columns: 1fr 56px 54px 64px;"><span>Index rebuild</span><span class="m" style="text-align: right;">4.1 s</span><span class="m unk" style="text-align: right;">? incomp.</span><span class="m mut" style="font-size: 10px; text-align: right;">local-m4</span></div>
+      </div>
+    </section>
+
+    <!-- matrix -->
+    <section class="panel" style="margin: 12px 16px 0;">
+      <div class="ph"><span class="lbl">Feature matrix · sorted by attention</span><span class="m mut" style="font-size: 11px;">44 features · <a href="#">all →</a></span></div>
+      <div class="row" style="grid-template-columns: 18px 150px 90px 60px 60px 60px 60px 60px 1fr 40px 50px; height: 22px; color: #6a7382;">
+        <span></span><span class="lbl">Feature</span><span class="lbl">State</span><span class="lbl">Unit</span><span class="lbl">Int</span><span class="lbl">E2E</span><span class="lbl">Visual</span><span class="lbl">Perf</span><span class="lbl">Runs (20)</span><span class="lbl" style="text-align: right;">ADR</span><span class="lbl" style="text-align: right;">Chg</span>
+      </div>
+      <div class="row bad" style="grid-template-columns: 18px 150px 90px 60px 60px 60px 60px 60px 1fr 40px 50px;"><span class="glyph bad">✕</span><span>PDF Export</span><span class="bad">Broken</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph bad">✕</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="runs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="f"></i><i class="f"></i><i class="f"></i></span><span class="m" style="text-align: right;">2</span><span class="m mut" style="text-align: right;">7h</span></div>
+      <div class="row warn" style="grid-template-columns: 18px 150px 90px 60px 60px 60px 60px 60px 1fr 40px 50px;"><span class="glyph warn">⚠</span><span>Search</span><span class="warn">Attention</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph warn">⚠</span><span class="runs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="m" style="text-align: right;">2</span><span class="m mut" style="text-align: right;">4h</span></div>
+      <div class="row warn" style="grid-template-columns: 18px 150px 90px 60px 60px 60px 60px 60px 1fr 40px 50px;"><span class="glyph warn">↻</span><span>Permissions</span><span class="warn">Attention</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph warn">↻</span><span class="glyph ok">✓</span><span class="runs"><i></i><i></i><i></i><i></i><i></i><i class="k"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="m" style="text-align: right;">1</span><span class="m mut" style="text-align: right;">3d</span></div>
+      <div class="row unk" style="grid-template-columns: 18px 150px 90px 60px 60px 60px 60px 60px 1fr 40px 50px;"><span class="glyph unk">?</span><span>Audit Log</span><span class="unk">Unknown</span><span class="glyph unk">?</span><span class="glyph unk">?</span><span class="glyph unk">?</span><span class="glyph mut">—</span><span class="glyph mut">—</span><span class="mut m" style="font-size: 10px;">no runs</span><span class="m" style="text-align: right;">1</span><span class="m mut" style="text-align: right;">21d</span></div>
+      <div class="row" style="grid-template-columns: 18px 150px 90px 60px 60px 60px 60px 60px 1fr 40px 50px;"><span class="glyph ok">✓</span><span>Authentication</span><span class="sec">Healthy</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="runs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="m" style="text-align: right;">3</span><span class="m mut" style="text-align: right;">2d</span></div>
+      <div class="row" style="grid-template-columns: 18px 150px 90px 60px 60px 60px 60px 60px 1fr 40px 50px;"><span class="glyph ok">✓</span><span>Dashboard</span><span class="sec">Healthy</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="runs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="m" style="text-align: right;">1</span><span class="m mut" style="text-align: right;">7d</span></div>
+      <div class="row" style="grid-template-columns: 18px 150px 90px 60px 60px 60px 60px 60px 1fr 40px 50px;"><span class="glyph ok">✓</span><span>Billing</span><span class="sec">Healthy</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="glyph ok">✓</span><span class="runs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="m" style="text-align: right;">4</span><span class="m mut" style="text-align: right;">3d</span></div>
+    </section>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
