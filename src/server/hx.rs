@@ -84,7 +84,41 @@ fn shell_ctx(app: &AppState) -> minijinja::Value {
         generation => st.generation,
         last_scan_at => st.last_scan_at.map(|t| t.to_string()),
         multi_repo => app.multi_repo,
+        perf_summary => perf_summary(&st.counts),
     }
+}
+
+/// `(class, href, text)` chips for the overview metrics row and the topbar.
+fn perf_summary(c: &crate::state::StateCounts) -> Vec<minijinja::Value> {
+    let mut v = Vec::new();
+    let mut push = |class: &str, href: &str, text: String| {
+        v.push(minijinja::context! { class => class, href => href, text => text });
+    };
+    if c.benchmark_breaches > 0 {
+        push("bad", "/performance?state=breach", format!("{} over budget", c.benchmark_breaches));
+    }
+    if c.benchmark_regressions > 0 {
+        push(
+            "warn",
+            "/performance?state=regression",
+            format!(
+                "{} regression{}",
+                c.benchmark_regressions,
+                if c.benchmark_regressions == 1 { "" } else { "s" }
+            ),
+        );
+    }
+    if c.benchmark_reported > 0 {
+        push("unk", "/performance?state=regression", format!("{} reported", c.benchmark_reported));
+    }
+    if c.benchmark_incomparable > 0 {
+        push(
+            "unk",
+            "/performance?state=incomparable",
+            format!("{} incomparable", c.benchmark_incomparable),
+        );
+    }
+    v
 }
 
 /// Render a page template with the standard context; `partial` decides whether chrome is

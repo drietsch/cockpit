@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "fragments/_perf_rows.html" import perf_rows %}
+{% block main %}
+<div class="page-h"><h1>Performance</h1><span class="muted">{{ table.counts.all }} metrics · {% if table.counts.breach %}<span class="bad">{{ table.counts.breach }} over budget</span> · {% endif %}{% if table.counts.regression %}<span class="warn">{{ table.counts.regression }} regression{{ table.counts.regression | plural('', 's') }}</span> · {% endif %}{% if table.counts.reported %}{{ table.counts.reported }} reported · {% endif %}{% if table.counts.incomparable %}{{ table.counts.incomparable }} incomparable · {% endif %}{{ table.counts.stable }} stable{% if table.counts.improved %} · <span class="ok">{{ table.counts.improved }} improved</span>{% endif %}</span></div>
+{% if not table.filtered %}
+{% if table.breaches %}
+<section>{{ m.section('Budget breaches') }}
+  {{ perf_rows(table.breaches) }}
+</section>
+{% endif %}
+{% if table.regressions %}
+<section>{{ m.section('Regressions') }}
+  {% if table.regressions | length >= 3 %}<div class="chart chart--hbar" data-chart="hbar" data-chart-height="{{ ([table.regressions | length, 10] | min) * 22 + 24 }}"><script type="application/json" data-chart-data>{{ table.hbar | tojson }}</script></div>{% endif %}
+  {{ perf_rows(table.regressions) }}
+</section>
+{% endif %}
+{% if table.incomparable %}
+<section>{{ m.section('Incomparable') }}
+  <div class="sec xs" style="margin-bottom:6px">Latest run on a different environment than the history it would be compared with. No change is stated.</div>
+  {{ perf_rows(table.incomparable, incomparable=true) }}
+</section>
+{% endif %}
+{% if table.improved %}
+<details class="section-collapse"><summary class="section__h"><h2>Improvements <span class="mono muted">{{ table.improved | length }}</span></h2></summary>{{ perf_rows(table.improved) }}</details>
+{% endif %}
+{% endif %}
+<section>{{ m.section('All metrics') }}
+{% include "fragments/performance_table.html" %}
+</section>
+{% endblock %}

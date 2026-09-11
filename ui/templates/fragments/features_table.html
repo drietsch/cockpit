@@ -1,5 +1,5 @@
 {% import "components/macros.html" as m %}
-<div id="features-table" hx-get="/fragments/features/table{{ table.query }}" hx-trigger="cockpit:refresh from:body" hx-swap="morph:outerHTML" hx-target="this" data-live="features">
+<div id="features-table" hx-get="/fragments/features/table{{ table.query }}" hx-trigger="cockpit:refresh from:body" hx-swap="morph:outerHTML" hx-target="this" hx-disinherit="hx-target hx-swap hx-trigger hx-get" data-live="features">
 <form class="filters" method="get" action="/features" hx-get="/fragments/features/table" hx-target="#features-table" hx-swap="morph:outerHTML" hx-trigger="change, submit, input changed delay:250ms from:[name=q]">
   <div class="chips" role="group" aria-label="State">
     {% for s in [['', 'All', table.total], ['broken', 'Broken', table.counts.broken], ['attention', 'Attention', table.counts.attention], ['unknown', 'Unknown', table.counts.unknown], ['healthy', 'Healthy', table.counts.healthy]] %}

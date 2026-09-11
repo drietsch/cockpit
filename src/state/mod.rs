@@ -2,6 +2,7 @@
 //! from the store after every scan and swapped atomically.
 
 pub mod attention;
+pub mod benchmark_cmp;
 pub mod build;
 pub mod freshness;
 pub mod health;
@@ -69,7 +70,10 @@ pub struct StateCounts {
     pub tests_skipped: usize,
     pub benchmarks: usize,
     pub benchmark_regressions: usize,
+    /// Regressions that only report (environment-sensitive, accepted).
+    pub benchmark_reported: usize,
     pub benchmark_breaches: usize,
+    pub benchmark_incomparable: usize,
     pub visuals: usize,
     pub visual_regressions: usize,
     pub visual_stale: usize,
@@ -125,7 +129,23 @@ pub struct BenchmarkView {
     pub features: Vec<(FeatureId, RelationOrigin)>,
     pub latest: Option<BenchmarkRun>,
     pub history: Vec<BenchmarkRun>,
-    pub comparison: Option<crate::state::build::BenchmarkComparison>,
+    pub comparison: Option<crate::state::benchmark_cmp::BenchmarkComparison>,
+    /// Ranked, resolved feature paths used for suspects; kept for the detail page.
+    pub environment_label: String,
+}
+
+impl BenchmarkView {
+    /// `memory · commit(1 field) · p50`
+    pub fn label(&self) -> String {
+        let mut s = self.benchmark.name.clone();
+        if let Some(sub) = &self.benchmark.subject {
+            s.push_str(" · ");
+            s.push_str(sub);
+        }
+        s.push_str(" · ");
+        s.push_str(&self.benchmark.metric.name);
+        s
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]

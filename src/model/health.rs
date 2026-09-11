@@ -112,6 +112,9 @@ pub struct KindRollup {
     pub refs: Vec<EvidenceRef>,
     pub required: bool,
     pub summary: String,
+    /// Severity hint for regression/breach rollups (determinism-aware); `None` = default.
+    #[serde(default)]
+    pub severity: Option<Severity>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

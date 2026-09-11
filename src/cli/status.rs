@@ -113,10 +113,20 @@ pub fn run(c: &Cockpit, limit: usize, fmt: &Format) -> anyhow::Result<i32> {
         println!("{:<13} {}", "Tests", fmt.dim("no test evidence yet"));
     }
     if cnt.benchmarks > 0 {
-        println!(
-            "{:<13} {} metrics   {} regressions   {} budget breaches",
-            "Performance", cnt.benchmarks, cnt.benchmark_regressions, cnt.benchmark_breaches
-        );
+        let mut parts = vec![format!("{} metrics", cnt.benchmarks)];
+        if cnt.benchmark_breaches > 0 {
+            parts.push(fmt.paint("31", &format!("{} over budget", cnt.benchmark_breaches)));
+        }
+        if cnt.benchmark_regressions > 0 {
+            parts.push(fmt.paint("33", &format!("{} regressions", cnt.benchmark_regressions)));
+        }
+        if cnt.benchmark_reported > 0 {
+            parts.push(fmt.dim(&format!("{} reported", cnt.benchmark_reported)));
+        }
+        if cnt.benchmark_incomparable > 0 {
+            parts.push(fmt.dim(&format!("{} incomparable", cnt.benchmark_incomparable)));
+        }
+        println!("{:<13} {}", "Performance", parts.join("   "));
     } else {
         println!("{:<13} {}", "Performance", fmt.dim("no benchmark evidence yet"));
     }

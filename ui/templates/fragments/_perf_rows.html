@@ -1,0 +1,21 @@
+{% import "components/macros.html" as m %}
+{% macro perf_rows(rows, incomparable=false) %}
+<div class="table-wrap"><table class="ledger perf">
+  <thead><tr><th class="w-icon"></th><th>Metric</th><th>Feature</th><th class="r">Value</th>{% if incomparable %}<th>Environments</th>{% else %}<th class="r">Change</th><th class="r">Baseline</th>{% endif %}<th>Class</th><th>Note</th></tr></thead>
+  <tbody>
+  {% for b in rows %}
+  <tr class="row-{% if b.class_key == 'breach' %}broken{% elif b.class_key == 'regression' and not b.informational %}attention{% endif %}" data-href="{{ url_for('benchmark', b.id) }}" data-id="{{ b.id }}">
+    <td class="w-icon">{{ m.glyph(b.status) }}</td>
+    <td><a class="t" href="{{ url_for('benchmark', b.id) }}">{{ b.name }}{% if b.subject %} <span class="muted">· {{ b.subject }}</span>{% endif %} <span class="mono">{{ b.metric }}</span></a></td>
+    <td class="xs">{% for f in b.features %}<a class="chip{% if not f.explicit %} chip--inferred{% endif %}" href="{{ url_for('feature', f.id) }}">{{ f.title | truncate_chars(28) }}</a> {% else %}<span class="muted">—</span>{% endfor %}</td>
+    <td class="r mono nowrap">{{ b.value_text }}</td>
+    {% if incomparable %}<td class="xs muted">{{ b.env }} <span class="mono">vs</span> {{ b.note | truncate_chars(60) }}</td>
+    {% else %}<td class="r mono nowrap {{ b.change_class }}">{% if b.change is not none %}{{ b.change | pct }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="r mono muted nowrap">{{ b.baseline_text or '—' }}</td>{% endif %}
+    <td class="xs"><span class="det det--{{ b.determinism_short }}" title="{{ b.determinism }}">{{ b.determinism_short }}</span></td>
+    <td class="xs muted">{{ b.note | truncate_chars(90) }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endmacro %}

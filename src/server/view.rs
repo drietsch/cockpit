@@ -117,6 +117,9 @@ fn status_label(state: String) -> String {
             "budget_breach" => "Budget breach".into(),
             "incomparable" => "Incomparable".into(),
             "improved" => "Improved".into(),
+            "reported" => "Reported".into(),
+            "stable" => "Stable".into(),
+            "first_run" => "First run".into(),
             "accepted" => "Accepted".into(),
             "proposed" => "Proposed".into(),
             "draft" => "Draft".into(),
@@ -135,14 +138,15 @@ fn status_label(state: String) -> String {
 /// The icon id + css class for any status word (health, rollup, adr, test).
 fn status_icon(state: String) -> Value {
     let (icon, class) = match state.as_str() {
-        "healthy" | "pass" | "passed" | "current" | "accepted" | "improved" | "ok" => {
+        "healthy" | "pass" | "passed" | "current" | "accepted" | "improved" | "ok" | "stable" => {
             ("check", "ok")
         }
         "attention" | "flaky" | "stale" | "regression" | "warning" | "stale_fail" => {
             ("warn", "warn")
         }
+        "reported" => ("info", "sec"),
         "broken" | "fail" | "failed" | "budget_breach" | "rejected" | "error" => ("x", "bad"),
-        "unknown" | "incomparable" => ("help", "unk"),
+        "unknown" | "incomparable" | "first_run" => ("help", "unk"),
         "missing" | "silent" | "skipped" => ("minus", "mut"),
         "proposed" | "draft" => ("circle", "sec"),
         "superseded" | "deprecated" => ("minus", "mut"),

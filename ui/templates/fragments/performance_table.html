@@ -1,0 +1,43 @@
+{% import "components/macros.html" as m %}
+<div id="perf-table" hx-get="/fragments/performance/table{{ table.query }}" hx-trigger="cockpit:refresh from:body" hx-swap="morph:outerHTML" hx-target="this" hx-disinherit="hx-target hx-swap hx-trigger hx-get" data-live="performance">
+<form class="filters" method="get" action="/performance" hx-get="/fragments/performance/table" hx-target="#perf-table" hx-swap="morph:outerHTML" hx-trigger="change, submit, input changed delay:250ms from:[name=q]">
+  <div class="chips" role="group" aria-label="State">
+    {% for s in [['all', 'All', table.counts.all], ['breach', 'Over budget', table.counts.breach], ['regression', 'Regressions', table.counts.regression + table.counts.reported], ['incomparable', 'Incomparable', table.counts.incomparable], ['stable', 'Stable', table.counts.stable], ['improved', 'Improved', table.counts.improved], ['unknown', 'First run', table.counts.unknown]] %}
+    <label class="chip-toggle{% if (table.filter.state or 'all') == s[0] %} is-on{% endif %}"><input type="radio" name="state" value="{{ s[0] }}"{% if (table.filter.state or 'all') == s[0] %} checked{% endif %}>{{ s[1] }} <span class="mono muted">{{ s[2] }}</span></label>
+    {% endfor %}
+  </div>
+  {% if table.filter.feature %}<input type="hidden" name="feature" value="{{ table.filter.feature }}">{% endif %}
+  {% if table.envs | length > 1 %}<select name="env" aria-label="Environment"><option value="">Any environment</option>{% for e in table.envs %}<option value="{{ e.id }}"{% if table.filter.env == e.id %} selected{% endif %}>{{ e.label }} ({{ e.count }})</option>{% endfor %}</select>{% endif %}
+  <select name="determinism" aria-label="Determinism"><option value="">Any class</option>{% for d in [['deterministic', 'deterministic'], ['semi-deterministic', 'semi-deterministic'], ['environment-sensitive', 'environment-sensitive']] %}<option value="{{ d[0] }}"{% if table.filter.determinism == d[0] %} selected{% endif %}>{{ d[1] }}</option>{% endfor %}</select>
+  <select name="sort" aria-label="Sort"><option value="state"{% if table.filter.sort == 'state' %} selected{% endif %}>Sort: state</option><option value="change"{% if table.filter.sort == 'change' %} selected{% endif %}>Sort: change</option><option value="recent"{% if table.filter.sort == 'recent' %} selected{% endif %}>Sort: last run</option><option value="name"{% if table.filter.sort == 'name' %} selected{% endif %}>Sort: name</option></select>
+  <input type="search" name="q" value="{{ table.filter.q or '' }}" placeholder="Filter…" aria-label="Filter metrics" data-page-filter>
+  <noscript><button class="btn">Apply</button></noscript>
+</form>
+{% if table.rows %}
+<div class="table-wrap">
+<table class="ledger perf" data-keynav>
+  <thead><tr><th class="w-icon"></th><th>Metric</th><th>Feature</th><th class="r">Value</th><th class="r">Change</th><th class="r">Budget</th><th>Environment</th><th>Class</th><th>State</th><th class="r">Last run</th><th>Trend</th></tr></thead>
+  <tbody>
+  {% for b in table.rows %}
+  <tr class="row-{% if b.class_key == 'breach' %}broken{% elif b.class_key == 'regression' and not b.informational %}attention{% endif %}" data-href="{{ url_for('benchmark', b.id) }}" data-id="{{ b.id }}">
+    <td class="w-icon">{{ m.glyph(b.status, b.note) }}</td>
+    <td><a class="t" href="{{ url_for('benchmark', b.id) }}">{{ b.name }}{% if b.subject %} <span class="muted">· {{ b.subject }}</span>{% endif %} <span class="mono">{{ b.metric }}</span></a></td>
+    <td class="xs">{% for f in b.features %}<a class="chip{% if not f.explicit %} chip--inferred{% endif %}" href="{{ url_for('feature', f.id) }}">{{ f.title | truncate_chars(28) }}</a> {% else %}<span class="muted">—</span>{% endfor %}</td>
+    <td class="r mono nowrap">{{ b.value_text or '—' }}</td>
+    <td class="r mono nowrap {{ b.change_class }}">{% if b.class_key == 'incomparable' %}<span class="muted" title="{{ b.note }}">n/a</span>{% elif b.change is not none %}{{ b.change | pct }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="r mono muted nowrap xs">{{ b.budget_text or '—' }}</td>
+    <td class="xs muted nowrap">{{ b.env | truncate_chars(34) }}{% if b.dirty %} <span class="warn" title="measured on a dirty working tree">dirty</span>{% endif %}</td>
+    <td class="xs"><span class="det det--{{ b.determinism_short }}" title="{{ b.determinism }}">{{ b.determinism_short }}</span></td>
+    <td class="nowrap">{{ m.status(b.status) }}</td>
+    <td class="r mono muted nowrap">{{ m.ago(b.last_run) }}</td>
+    <td>{{ b.sparkline }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if table.total > table.shown %}<div class="table-foot"><a href="/performance{{ table.query }}{% if table.query %}&{% else %}?{% endif %}limit=100000">Show all {{ table.total }}</a></div>{% endif %}
+{% else %}
+{{ m.empty('No benchmark evidence', 'No benchmark documents matched the configured sources. Cockpit reads cockpit.benchmark.v1 documents, Guardian bench results, Criterion output and paged measurements.', table.sources) }}
+{% endif %}
+</div>

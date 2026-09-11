@@ -141,6 +141,45 @@ impl CommitGraph {
         false
     }
 
+    /// Commits reachable from `to` but not from `from` (`from..to`), newest first, bounded.
+    pub fn between(&self, from: &Sha, to: &Sha, limit: usize) -> Vec<Sha> {
+        let mut excluded: HashSet<Sha> = HashSet::new();
+        let mut queue: VecDeque<&Sha> = VecDeque::new();
+        queue.push_back(from);
+        excluded.insert(from.clone());
+        while let Some(cur) = queue.pop_front() {
+            if excluded.len() > 20_000 {
+                break;
+            }
+            for p in self.parents.get(cur).into_iter().flatten() {
+                if excluded.insert(p.clone()) {
+                    queue.push_back(p);
+                }
+            }
+        }
+        let mut out: Vec<Sha> = Vec::new();
+        let mut seen: HashSet<Sha> = HashSet::new();
+        let mut queue: VecDeque<&Sha> = VecDeque::new();
+        queue.push_back(to);
+        seen.insert(to.clone());
+        while let Some(cur) = queue.pop_front() {
+            if excluded.contains(cur) {
+                continue;
+            }
+            out.push(cur.clone());
+            if out.len() >= limit {
+                break;
+            }
+            for p in self.parents.get(cur).into_iter().flatten() {
+                if seen.insert(p.clone()) {
+                    queue.push_back(p);
+                }
+            }
+        }
+        out.sort_by(|a, b| self.committed_at.get(b).cmp(&self.committed_at.get(a)));
+        out
+    }
+
     /// Latest commit (by committed_at) among `candidates`, tie-broken by descent.
     pub fn newest<'a>(&self, candidates: impl Iterator<Item = &'a Sha>) -> Option<Sha> {
         let mut best: Option<(&Sha, Timestamp)> = None;

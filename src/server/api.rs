@@ -17,6 +17,9 @@ pub fn router() -> Router<AppState> {
         .route("/attention", get(attention))
         .route("/adrs", get(adrs))
         .route("/adrs/{id}", get(adr))
+        .route("/benchmarks", get(benchmarks))
+        .route("/benchmarks/{id}", get(benchmark))
+        .route("/benchmarks/{id}/history", get(benchmark_history))
         .route("/changes", get(changes))
         .route("/commits/{sha}", get(commit))
         .route("/search", get(search))
@@ -71,6 +74,63 @@ async fn feature(State(app): State<AppState>, Path(id): Path<String>) -> Respons
         Some(v) => envelope(&app, super::routes::feature_detail_json(&st, v)),
         None => not_found("feature", &id),
     }
+}
+
+async fn benchmarks(
+    State(app): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let st = app.state.load();
+    let filter = match super::perf::PerfFilter::from_query(&q) {
+        Ok(f) => f,
+        Err(e) => return bad_request(&e),
+    };
+    let rows: Vec<serde_json::Value> = super::perf::filtered_benchmarks(&st, &filter)
+        .into_iter()
+        .map(|b| to_json(super::perf::benchmark_row(&st, b)))
+        .collect();
+    envelope(&app, serde_json::json!({ "items": rows, "total": st.benchmarks.len() }))
+}
+
+async fn benchmark(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let st = app.state.load();
+    match st.benchmarks.get(&crate::ids::BenchmarkId::new(id.clone())) {
+        Some(b) => envelope(
+            &app,
+            super::perf::benchmark_detail_json(
+                &st,
+                b,
+                q.get("range").map(|s| s.as_str()).unwrap_or("all"),
+            ),
+        ),
+        None => not_found("benchmark", &id),
+    }
+}
+
+async fn benchmark_history(State(app): State<AppState>, Path(id): Path<String>) -> Response {
+    let st = app.state.load();
+    match st.benchmarks.get(&crate::ids::BenchmarkId::new(id.clone())) {
+        Some(b) => {
+            envelope(&app, serde_json::json!({ "items": b.history, "total": b.history.len() }))
+        }
+        None => not_found("benchmark", &id),
+    }
+}
+
+fn bad_request(e: &super::hx::AppError) -> Response {
+    let msg = match e {
+        super::hx::AppError::BadQuery(m) => m.clone(),
+        other => format!("{other:?}"),
+    };
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "error": { "code": "bad_request", "message": msg } })),
+    )
+        .into_response()
 }
 
 async fn attention(State(app): State<AppState>) -> Response {

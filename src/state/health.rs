@@ -195,7 +195,7 @@ pub fn evaluate(
                 RollupStatus::Regression => {
                     reasons.push(HealthReason {
                         reason: AttentionReason::BenchmarkRegression,
-                        severity: Severity::Medium,
+                        severity: r.severity.unwrap_or(Severity::Medium),
                         text: format!("{label}: {}", r.summary),
                         evidence: r.refs.clone(),
                         confidence: Confidence::Medium,
@@ -210,10 +210,14 @@ pub fn evaluate(
                     });
                 }
                 RollupStatus::BudgetBreach => {
-                    broken = true;
+                    let sev = r.severity.unwrap_or(Severity::High);
+                    // Environment-sensitive breaches (Medium) never break a feature.
+                    if sev <= Severity::High {
+                        broken = true;
+                    }
                     reasons.push(HealthReason {
                         reason: AttentionReason::BenchmarkBudgetBreach,
-                        severity: Severity::High,
+                        severity: sev,
                         text: format!("{label}: {}", r.summary),
                         evidence: r.refs.clone(),
                         confidence: Confidence::High,

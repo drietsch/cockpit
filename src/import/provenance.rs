@@ -116,6 +116,10 @@ impl CommitLocator {
         }
     }
 
+    pub fn commit_time(&self, repo: &RepoId, sha: &Sha) -> Option<Timestamp> {
+        self.times.get(repo)?.iter().find(|(_, s)| s == sha).map(|(t, _)| *t)
+    }
+
     pub fn is_known(&self, repo: &RepoId, sha: &Sha) -> bool {
         self.known.get(repo).map(|s| s.contains(sha)).unwrap_or(false)
     }

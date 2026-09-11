@@ -4,7 +4,9 @@
 
 pub mod adr_md;
 pub mod batch;
+pub mod benchmark_json;
 pub mod cargo_index;
+pub mod criterion;
 pub mod feature_md;
 pub mod frontmatter;
 pub mod junit;
@@ -201,6 +203,18 @@ pub fn importer_for(kind: ImporterKind) -> Option<Box<dyn Importer>> {
         ImporterKind::Evidence(
             f @ (EvidenceFormat::CockpitResults | EvidenceFormat::PagedResults),
         ) => Some(Box::new(results_json::ResultsJsonImporter { format: f })),
+        ImporterKind::Evidence(EvidenceFormat::CockpitBenchmark) => {
+            Some(Box::new(benchmark_json::BenchmarkJsonImporter))
+        }
+        ImporterKind::Evidence(EvidenceFormat::GuardianBench) => {
+            Some(Box::new(benchmark_json::GuardianBenchImporter))
+        }
+        ImporterKind::Evidence(EvidenceFormat::PagedMeasurements) => {
+            Some(Box::new(benchmark_json::PagedMeasurementsImporter))
+        }
+        ImporterKind::Evidence(EvidenceFormat::Criterion) => {
+            Some(Box::new(criterion::CriterionImporter))
+        }
         ImporterKind::Evidence(_) => None,
     }
 }

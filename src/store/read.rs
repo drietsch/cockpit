@@ -170,8 +170,28 @@ impl Store {
         )
     }
 
+    /// Benchmarks with `first_seen`/`last_seen` taken from the row (the JSON carries the values
+    /// of whichever document was imported last).
     pub fn benchmarks(&self) -> Result<Vec<Benchmark>> {
-        load_json(self, "SELECT data_json FROM benchmarks ORDER BY name")
+        let mut stmt = self
+            .conn
+            .prepare("SELECT data_json, first_seen, last_seen FROM benchmarks ORDER BY name")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (json, first, last) = row?;
+            match serde_json::from_str::<Benchmark>(&json) {
+                Ok(mut b) => {
+                    b.first_seen = crate::time::from_millis(first);
+                    b.last_seen = crate::time::from_millis(last);
+                    out.push(b);
+                }
+                Err(e) => tracing::warn!("skipping unreadable benchmark row: {e}"),
+            }
+        }
+        Ok(out)
     }
 
     pub fn recent_benchmark_runs(&self, n: usize) -> Result<Vec<BenchmarkRun>> {

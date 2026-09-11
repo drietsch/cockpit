@@ -262,7 +262,7 @@ impl Store {
     pub fn upsert_benchmark(&self, b: &Benchmark) -> Result<()> {
         self.conn.execute(
             "INSERT INTO benchmarks(id, data_json, source_id, name, first_seen, last_seen) VALUES(?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json, last_seen = MAX(benchmarks.last_seen, excluded.last_seen)",
+             ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json, first_seen = MIN(benchmarks.first_seen, excluded.first_seen), last_seen = MAX(benchmarks.last_seen, excluded.last_seen)",
             params![b.id.as_str(), serde_json::to_string(b)?, b.source.as_str(), b.name, millis(b.first_seen), millis(b.last_seen)],
         )?;
         Ok(())

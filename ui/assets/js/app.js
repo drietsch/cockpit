@@ -4,6 +4,7 @@ import { initTheme } from './theme.js';
 import { initRelTime } from './reltime.js';
 import { initKeynav } from './keynav.js';
 import { initPalette } from './palette.js';
+import { initCharts } from './charts.js';
 
 function configureHtmx() {
   if (!window.htmx) { setTimeout(configureHtmx, 20); return; }
@@ -91,6 +92,7 @@ initTheme();
 initRelTime();
 initKeynav();
 initPalette();
+initCharts();
 initLive();
 initRowLinks();
 initCopy();

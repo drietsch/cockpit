@@ -5,6 +5,7 @@ pub mod api;
 pub mod assets;
 pub mod hx;
 pub mod markdown;
+pub mod perf;
 pub mod routes;
 pub mod sse;
 pub mod templates;
@@ -61,6 +62,7 @@ impl AppState {
 pub fn build_router(app: AppState) -> Router {
     Router::new()
         .merge(routes::router())
+        .merge(perf::router())
         .nest("/api/v1", api::router())
         .route("/events", axum::routing::get(sse::events))
         .route("/assets/{*path}", axum::routing::get(assets::serve))

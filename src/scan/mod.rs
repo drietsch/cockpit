@@ -86,6 +86,9 @@ impl<'a> Scanner<'a> {
     }
 
     fn emit(&self, p: ScanProgress) {
+        if let ScanProgress::Phase(name) = &p {
+            tracing::debug!("scan phase: {name}");
+        }
         if let Some(f) = self.progress {
             f(p);
         }
@@ -287,6 +290,23 @@ impl<'a> Scanner<'a> {
         locator.finish();
         store.batch_begin()?;
         let sources = self.located.evidence_sources();
+        // One tree walk serves every relative pattern of every source.
+        let mut rel_patterns: Vec<String> = Vec::new();
+        let mut pattern_slots: Vec<Vec<Option<usize>>> = Vec::new();
+        for src in &sources {
+            let mut slots = Vec::new();
+            for pat in src.paths() {
+                let pat = pat.trim_start_matches("./").to_string();
+                if pat.starts_with('/') {
+                    slots.push(None);
+                } else {
+                    slots.push(Some(rel_patterns.len()));
+                    rel_patterns.push(pat);
+                }
+            }
+            pattern_slots.push(slots);
+        }
+        let matched = glob_many(&self.located.root, &rel_patterns);
         for (i, src) in sources.iter().enumerate() {
             if !src.enabled {
                 continue;
@@ -307,12 +327,13 @@ impl<'a> Scanner<'a> {
                 commits: &locator,
             };
             let mut files: Vec<std::path::PathBuf> = Vec::new();
-            for pat in src.paths() {
-                let pat = pat.trim_start_matches("./").to_string();
-                if pat.starts_with('/') && src.allow_outside_root {
-                    files.extend(glob_abs(&pat));
-                } else {
-                    files.extend(glob_files(&self.located.root, &pat));
+            for (pat, slot) in src.paths().iter().zip(&pattern_slots[i]) {
+                match slot {
+                    Some(k) => files.extend(matched[*k].iter().cloned()),
+                    None if src.allow_outside_root => {
+                        files.extend(glob_abs(pat.trim_start_matches("./")))
+                    }
+                    None => {}
                 }
             }
             files.sort();
@@ -829,62 +850,128 @@ const HEAVY_DIRS: &[&str] = &[
 /// Files matching one glob below the root (used by doctor / evidence discovery). Walks only
 /// the literal prefix of the glob, and prunes heavy build/dependency directories the pattern
 /// does not mention.
-pub fn glob_files(root: &Path, pattern: &str) -> Vec<std::path::PathBuf> {
-    let Ok(glob) = globset::Glob::new(pattern) else { return vec![] };
-    let matcher = glob.compile_matcher();
-    let prefix: String = pattern.split(['*', '?', '[']).next().unwrap_or("").to_string();
-    let prefix_dir = if prefix.ends_with('/') {
-        prefix.clone()
-    } else {
-        prefix.rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default()
-    };
-    let start = if prefix_dir.is_empty() {
-        root.to_path_buf()
-    } else {
-        root.join(prefix_dir.trim_end_matches('/'))
-    };
-    if !start.exists() {
-        return vec![];
+type HeavyRules = Vec<(&'static str, Option<String>)>;
+
+/// One evidence glob with its pruning rules: heavy directories (`target`, `node_modules`, …)
+/// are entered only when the pattern names them, and then only through the literal child the
+/// pattern continues with (`target/nextest`, never all of `target/`).
+struct PatternRules {
+    matcher: globset::GlobMatcher,
+    heavy: HeavyRules,
+    cockpit: bool,
+}
+
+impl PatternRules {
+    fn new(pattern: &str) -> Option<PatternRules> {
+        let matcher = globset::Glob::new(pattern).ok()?.compile_matcher();
+        let segments: Vec<&str> = pattern.split('/').collect();
+        let heavy = HEAVY_DIRS
+            .iter()
+            .copied()
+            .filter_map(|d| {
+                let pos = segments.iter().position(|s| *s == d)?;
+                let next = segments.get(pos + 1).copied();
+                let literal = next.filter(|n| !n.contains(['*', '?', '['])).map(|n| n.to_string());
+                Some((d, literal))
+            })
+            .collect();
+        Some(PatternRules { matcher, heavy, cockpit: segments.contains(&".cockpit") })
     }
-    let mentioned: Vec<&str> =
-        HEAVY_DIRS.iter().copied().filter(|d| pattern.contains(&format!("{d}/"))).collect();
-    let start_rel = relativize(root, &start).unwrap_or_else(RelPath::root);
-    let mut out = Vec::new();
-    let mut builder = ignore::WalkBuilder::new(&start);
-    builder.standard_filters(false).hidden(false).follow_links(false).max_depth(Some(12));
-    builder.filter_entry(move |e| {
-        if e.depth() == 0 {
-            return true;
+
+    /// May this directory (given by name and its parent's name) be entered for this pattern?
+    fn enters(&self, name: &str, parent: Option<&str>) -> bool {
+        enters(&self.heavy, self.cockpit, name, parent)
+    }
+
+    fn accepts(&self, rel: &str) -> bool {
+        if !self.matcher.is_match(rel) {
+            return false;
         }
-        let n = e.file_name().to_string_lossy();
-        if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            if HEAVY_DIRS.contains(&n.as_ref()) && !mentioned.contains(&n.as_ref()) {
+        let mut parent: Option<&str> = None;
+        let comps: Vec<&str> = rel.split('/').collect();
+        for c in &comps[..comps.len().saturating_sub(1)] {
+            if !self.enters(c, parent) {
                 return false;
             }
-            if n.starts_with(".local-") || n == ".cockpit" && !pattern_mentions_cockpit(&start_rel)
-            {
+            parent = Some(c);
+        }
+        if let Some(pn) = parent {
+            // A file directly inside a heavy dir is never evidence unless the pattern says so.
+            if let Some((_, Some(_))) = self.heavy.iter().find(|(d, _)| *d == pn) {
                 return false;
             }
         }
         true
+    }
+}
+
+fn enters(
+    heavy: &[(&'static str, Option<String>)],
+    cockpit: bool,
+    name: &str,
+    parent: Option<&str>,
+) -> bool {
+    if HEAVY_DIRS.contains(&name) && !heavy.iter().any(|(d, _)| *d == name) {
+        return false;
+    }
+    if name == ".cockpit" && !cockpit {
+        return false;
+    }
+    if let Some(pn) = parent {
+        if let Some((_, Some(lit))) = heavy.iter().find(|(d, _)| *d == pn) {
+            return name == lit;
+        }
+    }
+    true
+}
+
+/// Match many patterns with one walk of the tree (the walk dominates scan time on large
+/// checkouts). Result is aligned with `patterns`.
+pub fn glob_many(root: &Path, patterns: &[String]) -> Vec<Vec<std::path::PathBuf>> {
+    let rules: Vec<Option<PatternRules>> =
+        patterns.iter().map(|p| PatternRules::new(p.trim_start_matches("./"))).collect();
+    let mut out: Vec<Vec<std::path::PathBuf>> = vec![Vec::new(); patterns.len()];
+    if rules.iter().all(|r| r.is_none()) {
+        return out;
+    }
+    let active: Vec<&PatternRules> = rules.iter().flatten().collect();
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder.standard_filters(false).hidden(false).follow_links(false).max_depth(Some(14));
+    let for_filter: Vec<(HeavyRules, bool)> =
+        active.iter().map(|r| (r.heavy.clone(), r.cockpit)).collect();
+    builder.filter_entry(move |e| {
+        if e.depth() == 0 || !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            return true;
+        }
+        let n = e.file_name().to_string_lossy();
+        if n.starts_with(".local-") || n == ".git" {
+            return false;
+        }
+        let parent = e.path().parent().and_then(|p| p.file_name()).map(|p| p.to_string_lossy());
+        for_filter.iter().any(|(heavy, cockpit)| enters(heavy, *cockpit, &n, parent.as_deref()))
     });
     for entry in builder.build().flatten() {
         let p = entry.path();
         if !p.is_file() {
             continue;
         }
-        if let Some(rel) = relativize(root, p) {
-            if matcher.is_match(rel.as_str()) {
-                out.push(p.to_path_buf());
+        let Some(rel) = relativize(root, p) else { continue };
+        for (i, r) in rules.iter().enumerate() {
+            if let Some(r) = r {
+                if r.accepts(rel.as_str()) {
+                    out[i].push(p.to_path_buf());
+                }
             }
         }
     }
-    out.sort();
+    for v in out.iter_mut() {
+        v.sort();
+    }
     out
 }
 
-fn pattern_mentions_cockpit(start_rel: &RelPath) -> bool {
-    start_rel.components().any(|c| c == ".cockpit")
+pub fn glob_files(root: &Path, pattern: &str) -> Vec<std::path::PathBuf> {
+    glob_many(root, &[pattern.to_string()]).remove(0)
 }
 
 fn locator_time(store: &Store, repo: &RepoId, sha: &Sha) -> Option<Timestamp> {

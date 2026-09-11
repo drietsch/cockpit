@@ -63,7 +63,9 @@ impl Cockpit {
         }
         let report = scanner.full(&mut self.store)?;
         self.last_report = Some(report.clone());
+        let t = std::time::Instant::now();
         self.rebuild_state()?;
+        tracing::debug!("state rebuilt in {} ms", t.elapsed().as_millis());
         Ok(report)
     }
 

@@ -37,6 +37,10 @@ const CATALOGUE: &[(&str, Level, &str)] = &[
     ("EV005", Level::Warn, "runs are valid (not all-failed/silent)"),
     ("EV006", Level::Error, "no failing evidence on required kinds"),
     ("SUITE001", Level::Warn, "configured suites publish within expect_every"),
+    ("PERF001", Level::Warn, "benchmarks have a comparable baseline"),
+    ("PERF002", Level::Error, "no performance budget is breached"),
+    ("PERF003", Level::Error, "deterministic regressions are classified (accepted) or fixed"),
+    ("PERF004", Level::Warn, "semi-deterministic regressions are classified or fixed"),
     ("CLAIM001", Level::Warn, "claimed components have evidence"),
 ];
 
@@ -47,6 +51,12 @@ fn level_for(code: &str, cfg: &crate::config::Config) -> Level {
             "error" => Level::Error,
             _ => Level::Ignore,
         };
+    }
+    if code == "PERF001"
+        && !cfg.policy.checks.contains_key(code)
+        && !cfg.policy.performance.require_comparable_baseline
+    {
+        return Level::Ignore;
     }
     if let Some(o) = cfg.policy.checks.get(code) {
         return match o.as_str() {
@@ -213,6 +223,37 @@ pub fn run(c: &Cockpit, strict: bool, fmt: &Format) -> anyhow::Result<i32> {
     }
     for a in st.attention.iter().filter(|a| a.reason == AttentionReason::EvidenceInvalid) {
         push("EV005", a.subject.clone(), a.summary.clone(), "evidence.validity");
+    }
+    {
+        use crate::model::Determinism;
+        use crate::state::benchmark_cmp::Classification;
+        for b in st.benchmarks.values() {
+            let Some(cmp) = &b.comparison else { continue };
+            let label = b.label();
+            match cmp.classification {
+                Classification::Incomparable => {
+                    push("PERF001", label, cmp.note.clone(), "policy.performance")
+                }
+                Classification::BudgetBreach
+                    if cmp.determinism != Determinism::EnvironmentSensitive =>
+                {
+                    push("PERF002", label, cmp.note.clone(), "performance.budget")
+                }
+                Classification::Regression if cmp.accepted.is_none() => match cmp.determinism {
+                    Determinism::Deterministic => {
+                        push("PERF003", label, cmp.note.clone(), "performance.policy.deterministic")
+                    }
+                    Determinism::SemiDeterministic if cmp.gate => push(
+                        "PERF004",
+                        label,
+                        cmp.note.clone(),
+                        "performance.policy.semi_deterministic",
+                    ),
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
     }
 
     if strict {

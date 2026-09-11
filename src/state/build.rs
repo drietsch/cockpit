@@ -8,19 +8,7 @@ use crate::link::{FeatureIdIndex, PathOwnership};
 use crate::store::Store;
 use crate::time::{millis, now as time_now};
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
-
-#[derive(Clone, Debug, Serialize)]
-pub struct BenchmarkComparison {
-    pub baseline_run: Option<BenchmarkRunId>,
-    pub baseline_value: Option<f64>,
-    pub absolute_change: Option<f64>,
-    pub relative_change: Option<f64>,
-    pub classification: String,
-    pub confidence: Confidence,
-    pub note: String,
-}
 
 pub struct BuildInput<'a> {
     pub store: &'a Store,
@@ -280,6 +268,8 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
     let visuals_raw = store.recent_visuals()?;
     let artifacts_raw = store.artifacts()?;
     let environments_raw = store.environments()?;
+    let environments_by_id: HashMap<EnvironmentId, EnvironmentFingerprint> =
+        environments_raw.iter().map(|e| (e.id.clone(), e.clone())).collect();
     let mut runs_by_test: HashMap<TestId, Vec<TestRun>> = HashMap::new();
     for tr in recent_runs {
         runs_by_test.entry(tr.test.clone()).or_default().push(tr);
@@ -366,6 +356,98 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
     }
     let max_age = cfg.health.max_evidence_age();
 
+    // Benchmarks: one series per benchmark (all environments), compared and classified; linked
+    // to features by declared ids (document, per-metric, or the evidence source's defaults).
+    let benchmarks_raw = store.benchmarks()?;
+    let bench_runs = store.recent_benchmark_runs(cfg.performance.history_limit)?;
+    let mut runs_by_bench: HashMap<BenchmarkId, Vec<BenchmarkRun>> = HashMap::new();
+    for r in bench_runs {
+        runs_by_bench.entry(r.benchmark.clone()).or_default().push(r);
+    }
+    let commit_files: HashMap<CommitKey, Vec<String>> = all_commits
+        .iter()
+        .map(|c| (c.key.clone(), c.files.iter().map(|f| f.path.as_str().to_string()).collect()))
+        .collect();
+    let feature_globs: HashMap<FeatureId, Vec<String>> = feature_paths_by_id(store)?;
+    let mut benchmarks: BTreeMap<BenchmarkId, BenchmarkView> = BTreeMap::new();
+    let mut feature_benchmarks: HashMap<FeatureId, Vec<BenchmarkId>> = HashMap::new();
+    for b in benchmarks_raw {
+        let mut feats: Vec<(FeatureId, RelationOrigin)> = Vec::new();
+        for raw in &b.declared_feature_ids {
+            match idx.resolve(raw) {
+                Some(id) => {
+                    if !feats.iter().any(|(f, _)| f == &id) {
+                        relationships.push(Relationship {
+                            from: EntityRef::Benchmark(b.id.clone()),
+                            to: EntityRef::Feature(id.clone()),
+                            kind: RelationKind::BenchmarkMeasures,
+                            origin: RelationOrigin::Explicit(ExplicitSource::Interchange),
+                            confidence: Confidence::High,
+                        });
+                        feats.push((id, RelationOrigin::Explicit(ExplicitSource::Interchange)));
+                    }
+                }
+                None => unresolved.push(UnresolvedRef {
+                    from: EntityRef::Benchmark(b.id.clone()),
+                    raw: raw.clone(),
+                    target_kind: "feature".into(),
+                    note: Some(format!(
+                        "benchmark {} names feature {raw}, which does not exist",
+                        b.name
+                    )),
+                }),
+            }
+        }
+        let mut owned = GlobSetBuilder::new();
+        for (f, _) in &feats {
+            for g in feature_globs.get(f).into_iter().flatten() {
+                if let Ok(g) = Glob::new(g) {
+                    owned.add(g);
+                }
+            }
+        }
+        let owned = owned.build().unwrap_or_else(|_| GlobSet::empty());
+        let mut history = runs_by_bench.remove(&b.id).unwrap_or_default();
+        history.sort_by(|a, c| {
+            c.timestamp.value.cmp(&a.timestamp.value).then_with(|| c.id.cmp(&a.id))
+        });
+        let comparison =
+            crate::state::benchmark_cmp::compare(&crate::state::benchmark_cmp::CompareInput {
+                benchmark: &b,
+                runs: &history,
+                cfg: &cfg.performance,
+                environments: &environments_by_id,
+                tags: &tags,
+                graphs: &graphs,
+                owned_paths: &owned,
+                commit_files: &commit_files,
+            });
+        for (f, _) in &feats {
+            feature_benchmarks.entry(f.clone()).or_default().push(b.id.clone());
+        }
+        let latest = history
+            .iter()
+            .find(|r| r.measurement.status == MeasurementStatus::Ok)
+            .or(history.first())
+            .cloned();
+        let environment_label = latest
+            .as_ref()
+            .and_then(|r| environments_by_id.get(&r.environment))
+            .map(|e| e.label.clone())
+            .unwrap_or_default();
+        benchmarks.insert(
+            b.id.clone(),
+            BenchmarkView {
+                benchmark: b,
+                features: feats,
+                latest,
+                history,
+                comparison,
+                environment_label,
+            },
+        );
+    }
+
     // Feature views with health.
     let mut feature_views: BTreeMap<FeatureId, FeatureView> = BTreeMap::new();
     for f in features {
@@ -386,6 +468,7 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
         adr_list.dedup();
         let test_ids = feature_tests.remove(&f.id).unwrap_or_default();
         let visual_ids = feature_visuals.remove(&f.id).unwrap_or_default();
+        let bench_ids = feature_benchmarks.remove(&f.id).unwrap_or_default();
         let required: Vec<EvidenceCategory> = cfg
             .health
             .required_for(f.importance.as_str())
@@ -402,13 +485,20 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
         let tviews: Vec<&TestView> = test_ids.iter().filter_map(|t| tests.get(t)).collect();
         let vviews: Vec<&VisualEvidence> =
             visual_ids.iter().filter_map(|v| visuals.get(v)).map(|v| &v.latest).collect();
-        let rollups = crate::state::rollup::rollups(&crate::state::rollup::RollupInput {
+        let mut rollups = crate::state::rollup::rollups(&crate::state::rollup::RollupInput {
             tests: tviews.clone(),
             visuals: vviews,
             required: &required,
             freshness: &fin,
         });
-        let mut extra_reasons = Vec::new();
+        let bviews: Vec<&BenchmarkView> =
+            bench_ids.iter().filter_map(|b| benchmarks.get(b)).collect();
+        let (perf, mut extra_reasons) = crate::state::rollup::perf_rollup(
+            &bviews,
+            required.contains(&EvidenceCategory::Perf),
+            &fin,
+        );
+        rollups.push(perf);
         for t in &tviews {
             if let Some((prev, latest, rel)) = t.duration_trend {
                 extra_reasons.push(HealthReason {
@@ -474,7 +564,7 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
                 commits: links_c,
                 adrs: adr_list,
                 tests: test_ids,
-                benchmarks: vec![],
+                benchmarks: bench_ids,
                 visuals: visual_ids,
             },
         );
@@ -528,9 +618,48 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
         })
         .collect();
 
+    // Benchmarks that belong to no feature still raise their regressions and breaches.
+    let bench_items: Vec<AttentionItem> = benchmarks
+        .values()
+        .filter(|b| b.features.is_empty())
+        .filter_map(|b| {
+            let c = b.comparison.as_ref()?;
+            use crate::state::benchmark_cmp::Classification;
+            let reason = match c.classification {
+                Classification::Regression => AttentionReason::BenchmarkRegression,
+                Classification::BudgetBreach => AttentionReason::BenchmarkBudgetBreach,
+                _ => return None,
+            };
+            Some(AttentionItem {
+                id: crate::ids::AttentionId::derive(reason.as_str(), None, b.benchmark.id.as_str()),
+                reason,
+                severity: c.severity,
+                status: AttentionStatus::Open,
+                feature: None,
+                feature_title: None,
+                subject: b.benchmark.id.0.clone(),
+                title: reason.label().to_string(),
+                summary: format!("{}: {}", b.label(), c.note),
+                why_it_matters: match reason {
+                    AttentionReason::BenchmarkBudgetBreach => "A performance budget is a contract, and it is violated.".into(),
+                    _ => "Performance moved in the wrong direction after a change.".into(),
+                },
+                evidence: vec![EvidenceRef::new(EvidenceKind::Benchmark, b.benchmark.id.as_str(), b.label())],
+                confidence: c.confidence,
+                score: 0,
+                first_seen: now,
+                last_seen: now,
+                resolved_at: None,
+                commit: c.origin.as_ref().and_then(|o| o.commit.as_ref()).map(|c| c.key.clone()),
+                payload: serde_json::json!({ "classification": c.classification.as_str(), "determinism": c.determinism.as_str() }),
+            })
+        })
+        .collect();
+
     // Attention: feature reasons + project-level items, merged with persisted first_seen.
     let mut extra_items = suite_reasons;
     extra_items.extend(unlinked_items);
+    extra_items.extend(bench_items);
     let attention = crate::state::attention::collect(
         &feature_views,
         &warnings,
@@ -577,6 +706,19 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
             counts.tests_flaky += 1;
         }
     }
+    counts.benchmarks = benchmarks.len();
+    for b in benchmarks.values() {
+        use crate::state::benchmark_cmp::Classification;
+        match b.comparison.as_ref().map(|c| (c.classification, c.severity)) {
+            Some((Classification::Regression, Severity::Informational)) => {
+                counts.benchmark_reported += 1
+            }
+            Some((Classification::Regression, _)) => counts.benchmark_regressions += 1,
+            Some((Classification::BudgetBreach, _)) => counts.benchmark_breaches += 1,
+            Some((Classification::Incomparable, _)) => counts.benchmark_incomparable += 1,
+            _ => {}
+        }
+    }
     counts.visuals = visuals.len();
     counts.visual_regressions =
         visuals.values().filter(|v| v.latest.status == VisualStatus::Regression).count();
@@ -616,12 +758,24 @@ pub fn build(input: BuildInput) -> crate::store::Result<ProjectState> {
         warnings,
         suites: suite_views,
         tests,
-        benchmarks: BTreeMap::new(),
+        benchmarks,
         visuals,
         environments: environments_raw.into_iter().map(|e| (e.id.clone(), e)).collect(),
         artifacts: artifacts_raw.into_iter().map(|a| (a.id.clone(), a)).collect(),
         sources: summarize_sources(input.located, store),
     })
+}
+
+/// Feature id → its `paths:` globs (normalised), for ranking regression suspects.
+fn feature_paths_by_id(store: &Store) -> crate::store::Result<HashMap<FeatureId, Vec<String>>> {
+    Ok(store
+        .features()?
+        .into_iter()
+        .map(|f| {
+            let globs = f.paths.iter().map(|p| crate::link::ownership::normalise_glob(p)).collect();
+            (f.id, globs)
+        })
+        .collect())
 }
 
 pub fn headline(c: &StateCounts) -> (HealthState, String) {

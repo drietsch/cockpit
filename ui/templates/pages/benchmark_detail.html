@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block main %}
+<article class="detail">
+  <header class="detail__h row-{% if b.class_key == 'breach' %}broken{% elif b.class_key == 'regression' and not b.informational %}attention{% endif %}">
+    <div class="detail__title"><h1>{{ b.name }}{% if b.subject %} <span class="muted">· {{ b.subject }}</span>{% endif %} <span class="mono">{{ b.metric }}</span></h1>{{ m.idchip(b.id) }}</div>
+    <div class="detail__state">{{ m.status(b.status) }}<span class="detail__headline">{{ b.note }}</span></div>
+    <div class="bench-top">
+      <div class="bench-value"><span class="bench-value__v mono">{{ b.value_text or '—' }}</span>{% if b.class_key != 'incomparable' and b.change is not none %}<span class="bench-value__d mono {{ b.change_class }}">{{ b.change | pct }}</span>{% endif %}<span class="bench-value__u muted xs">{{ b.direction | replace('_', ' ') }}</span></div>
+      <dl class="kv kv--inline">
+        <dt>Class</dt><dd><span class="det det--{{ b.determinism_short }}">{{ b.determinism }}</span>{% if b.determinism == 'environment-sensitive' %} <span class="muted xs">never gates</span>{% endif %}</dd>
+        {% if b.budget_text %}<dt>Budget</dt><dd class="mono">{{ b.budget_text }}</dd>{% endif %}
+        <dt>Environment</dt><dd>{{ b.env }}{% if b.dirty %} <span class="warn">dirty tree</span>{% endif %}</dd>
+        {% if b.commit %}<dt>Commit</dt><dd>{{ m.commit_ref(b.commit.repo, b.commit.sha, none, shell.multi_repo) }}</dd>{% endif %}
+        <dt>Measured</dt><dd>{{ m.ago(b.last_run) }}</dd>
+        {% if b.features %}<dt>Feature</dt><dd>{% for f in b.features %}{{ m.feature_ref(f.id, f.title, f.state) }} {% endfor %}</dd>{% endif %}
+        {% if baseline %}<dt>Baseline</dt><dd>{{ baseline.mode }}{% if baseline.value_text %} · <span class="mono">{{ baseline.value_text }}</span>{% endif %}{% if baseline.commit %} · {{ m.commit_ref(baseline.commit.repo, baseline.commit.sha, none, shell.multi_repo) }}{% endif %}{% if baseline.at %} · {{ m.ago(baseline.at) }}{% endif %}</dd>
+        <dt>Noise band</dt><dd class="mono">±{{ baseline.noise_pct }}%{% if not baseline.gate %} <span class="muted xs">(report only)</span>{% endif %}</dd>
+        <dt>Confidence</dt><dd>{{ baseline.confidence }}</dd>
+        {% if baseline.significance %}<dt>Significance</dt><dd>{{ baseline.significance }}</dd>{% endif %}
+        {% if baseline.accepted %}<dt>Accepted</dt><dd>{{ baseline.accepted }}</dd>{% endif %}{% endif %}
+      </dl>
+    </div>
+  </header>
+
+  {% if b.class_key == 'incomparable' %}
+  <section class="incomparable">{{ m.section('Why no change is stated') }}
+    <div class="sec">{{ b.note }}</div>
+    <div class="grid-2">
+      <div><div class="xs muted">Current</div><div class="mono">{{ b.env }}</div></div>
+      <div><div class="xs muted">Baseline</div><div class="mono">{{ baseline.env if baseline else '—' }}</div></div>
+    </div>
+  </section>
+  {% endif %}
+
+  <section>
+    <div class="section__h"><h2>History</h2>
+      <div class="chips">{% for r in [['30d', '30 days'], ['90d', '90 days'], ['1y', '1 year'], ['all', 'All']] %}<a class="chip-toggle{% if range == r[0] %} is-on{% endif %}" href="{{ url_for('benchmark', b.id) }}?range={{ r[0] }}{% if tab != 'history' %}&tab={{ tab }}{% endif %}">{{ r[1] }}</a>{% endfor %}</div>
+    </div>
+    {% if detail.chart.points | length >= 2 %}
+    <div class="chart chart--history" data-chart="lineHistory" data-chart-height="260"><script type="application/json" data-chart-data>{{ chart_json | safe }}</script><noscript><div class="muted xs">Enable JavaScript for the history chart; the table below lists every run.</div></noscript></div>
+    {% else %}<div class="empty empty--calm">Only one measurement so far — a chart needs at least two runs.</div>{% endif %}
+  </section>
+
+  {% if origin %}
+  <section class="regression">{{ m.section('Regression') }}
+    <dl class="kv">
+      <dt>First observed</dt><dd>{{ m.ago(origin.at) }}{% if origin.commit %} · after {{ m.commit_ref(origin.commit.repo, origin.commit.sha, origin.commit.subject, shell.multi_repo) }}{% if origin.commit.subject %} <span class="muted">{{ origin.commit.subject | truncate_chars(70) }}</span>{% endif %}{% endif %}</dd>
+      <dt>Step</dt><dd class="mono">{{ origin.prior_value_text or '—' }} → {{ origin.value_text }}</dd>
+      {% if baseline %}<dt>Confidence</dt><dd>{{ baseline.confidence }} · {{ b.determinism }}</dd>{% endif %}
+    </dl>
+    {% if origin.suspects %}
+    <div class="xs muted" style="margin:8px 0 4px">Commits between the prior run and the origin, those touching linked feature paths first</div>
+    <table class="ledger">{% for c in origin.suspects %}<tr data-href="{{ url_for('commit', c.sha, c.repo) }}"><td class="muted mono w-ago">{{ m.ago(c.at) }}</td><td class="mono w-sha">{{ c.short }}</td><td><span class="t">{{ c.subject | truncate_chars(80) }}</span></td><td class="r xs muted">{{ c.files }} files</td></tr>{% endfor %}</table>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <nav class="tabs" aria-label="Detail tabs">
+    {% for t in [['history', 'Runs'], ['distribution', 'Distribution'], ['environment', 'Environment'], ['raw', 'Raw']] %}<a class="tab{% if tab == t[0] %} is-on{% endif %}" href="{{ url_for('benchmark', b.id) }}?tab={{ t[0] }}{% if range != 'all' %}&range={{ range }}{% endif %}">{{ t[1] }}</a>{% endfor %}
+  </nav>
+
+  {% if tab == 'history' %}
+  <section>
+    <div class="table-wrap"><table class="ledger">
+      <thead><tr><th class="w-icon"></th><th>When</th><th>Commit</th><th class="r">Value</th><th class="r">p50 / p95</th><th>Environment</th><th>Note</th></tr></thead>
+      <tbody>{% for r in history %}
+      <tr class="{% if not r.comparable %}is-dim{% endif %}">
+        <td class="w-icon">{% if r.is_current %}{{ m.glyph('current', 'current run') }}{% elif r.is_baseline %}<span class="mono xs muted" title="baseline">base</span>{% elif r.is_origin %}{{ m.glyph('attention', 'regression origin') }}{% endif %}</td>
+        <td class="nowrap">{{ r.at | datetime }} <span class="muted xs">{{ m.ago(r.at) }}{% if r.at_origin != 'declared' %} · {{ r.at_origin | replace('_', ' ') }}{% endif %}</span></td>
+        <td class="mono xs">{% if r.commit %}{{ m.commit_ref(r.commit.repo, r.commit.sha, none, shell.multi_repo) }}{% if not r.commit.resolved %} <span class="muted">not local</span>{% endif %}{% endif %}{% if r.dirty %} <span class="warn">dirty</span>{% endif %}</td>
+        <td class="r mono">{% if r.status == 'ok' %}{{ r.value_text }}{% else %}<span class="muted">{{ r.status }}</span>{% endif %}</td>
+        <td class="r mono xs muted">{% if r.stats and r.stats.p50 is not none %}{{ r.stats.p50 | round(2) }} / {{ r.stats.p95 | round(2) if r.stats.p95 is not none else '—' }}{% else %}—{% endif %}</td>
+        <td class="xs muted nowrap">{{ r.env | truncate_chars(36) }}{% if not r.comparable %} <span title="different environment class">≠</span>{% endif %}</td>
+        <td class="xs muted">{{ r.reason or r.accepted or '' }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% if detail.history_total > history | length %}<div class="table-foot muted xs">Showing {{ history | length }} of {{ detail.history_total }} runs kept in the window.</div>{% endif %}
+  </section>
+  {% elif tab == 'distribution' %}
+  <section>
+    {% if dist %}
+    <div class="hist" role="img" aria-label="sample distribution">{% for h in dist.hist %}<span class="hist__b" style="height: {{ h }}%"></span>{% endfor %}</div>
+    <dl class="kv kv--inline mono xs"><dt>n</dt><dd>{{ dist.n }}</dd><dt>min</dt><dd>{{ dist.min | round(3) }}</dd><dt>p50</dt><dd>{{ dist.p50 | round(3) }}</dd><dt>p95</dt><dd>{{ dist.p95 | round(3) }}</dd><dt>p99</dt><dd>{{ dist.p99 | round(3) }}</dd><dt>max</dt><dd>{{ dist.max | round(3) }}</dd><dt>mean</dt><dd>{{ dist.mean | round(3) }}</dd><dt>σ</dt><dd>{{ dist.std_dev | round(3) }}</dd></dl>
+    {% elif detail.latest and detail.latest.measurement.statistics %}
+    <dl class="kv kv--inline mono xs">{% for k, v in detail.latest.measurement.statistics | items %}{% if v is not none %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endif %}{% endfor %}</dl>
+    {% else %}<div class="empty empty--calm">The producer recorded a single value without samples or statistics.</div>{% endif %}
+  </section>
+  {% elif tab == 'environment' %}
+  <section>
+    {% if env_rows %}
+    <table class="kv-table"><thead><tr><th></th><th>Current</th><th>Baseline</th></tr></thead>{% for r in env_rows %}<tr class="{% if r.differs %}row-attention{% endif %}"><td class="kv-k mono xs">{{ r.key }}{% if r.comparability %} <span class="muted" title="part of the comparability class">·</span>{% endif %}</td><td class="mono xs">{{ r.current }}</td><td class="mono xs muted">{{ r.baseline if r.baseline is not none else '—' }}</td></tr>{% endfor %}</table>
+    <div class="muted xs" style="margin-top:6px">Rows marked · form the comparability class: two runs compare only when all of them match.</div>
+    {% else %}<div class="empty empty--calm">No environment fingerprint recorded.</div>{% endif %}
+  </section>
+  {% elif tab == 'raw' %}
+  <section><pre class="output">{{ raw_json }}</pre></section>
+  {% endif %}
+</article>
+{% endblock %}

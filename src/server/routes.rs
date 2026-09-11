@@ -27,7 +27,6 @@ pub fn router() -> Router<AppState> {
         .route("/tests", get(tests))
         .route("/tests/{id}", get(test_detail))
         .route("/fragments/tests/table", get(tests_table_fragment))
-        .route("/performance", get(coming_soon))
         .route("/visual", get(coming_soon))
 }
 
@@ -68,10 +67,11 @@ async fn overview(hx: Hx, State(app): State<AppState>) -> Result<Page, AppError>
         return render(&app, &hx, "pages/scanning.html", "Scanning", "overview", context! {});
     }
     let attention: Vec<Value> =
-        st.attention.iter().take(8).map(|a| attention_row(&st, a)).collect();
+        st.actionable_attention().take(8).map(|a| attention_row(&st, a)).collect();
     let changes = change_rows(&st, None, None, 8);
     let matrix: Vec<Value> =
         st.features_sorted().into_iter().take(15).map(|v| feature_row(&st, v)).collect();
+    let perf = super::perf::overview_changes(&st, 8);
     render(
         &app,
         &hx,
@@ -82,15 +82,51 @@ async fn overview(hx: Hx, State(app): State<AppState>) -> Result<Page, AppError>
             attention => attention,
             changes => changes,
             matrix => matrix,
+            perf => perf,
             sources => Value::from_serialize(&st.sources),
             features_path => st.project.root.display().to_string(),
         },
     )
 }
 
+/// Where an attention item leads: its feature, else the subject it is about.
+pub fn attention_target(st: &ProjectState, a: &AttentionItem) -> (String, String) {
+    let enc = super::view::urlencode;
+    if let Some(f) = &a.feature {
+        return (
+            format!("/features/{}", enc(f.as_str())),
+            a.feature_title.clone().unwrap_or_else(|| f.to_string()),
+        );
+    }
+    match a.reason {
+        AttentionReason::BenchmarkRegression
+        | AttentionReason::BenchmarkBudgetBreach
+        | AttentionReason::BenchmarkIncomparable => {
+            let label = st
+                .benchmarks
+                .get(&crate::ids::BenchmarkId::new(a.subject.clone()))
+                .map(|b| b.label())
+                .unwrap_or_else(|| a.subject.clone());
+            (format!("/performance/{}", enc(&a.subject)), label)
+        }
+        AttentionReason::SuiteSilent => {
+            (format!("/tests?suite={}", enc(&a.subject)), a.subject.clone())
+        }
+        AttentionReason::UnlinkedTests => {
+            (format!("/tests?status=unlinked&suite={}", enc(&a.subject)), a.subject.clone())
+        }
+        _ => ("/status".into(), a.subject.clone()),
+    }
+}
+
 pub fn attention_row(st: &ProjectState, a: &AttentionItem) -> Value {
     let fv = a.feature.as_ref().and_then(|f| st.features.get(f));
-    let state = fv.map(|f| f.health.state.as_str()).unwrap_or("attention");
+    let state = fv.map(|f| f.health.state.as_str()).unwrap_or(match a.severity {
+        Severity::Informational => "unknown",
+        Severity::Critical | Severity::High => "broken",
+        _ => "attention",
+    });
+    let (target, subject_title) = attention_target(st, a);
     let strip: Vec<Value> = fv
         .map(|f| {
             f.health
@@ -113,6 +149,8 @@ pub fn attention_row(st: &ProjectState, a: &AttentionItem) -> Value {
         commit => a.commit.as_ref().map(|c| context! { repo => c.repo.as_str(), sha => c.sha.as_str(), short => c.sha.short() }),
         strip => strip,
         subject => a.subject.clone(),
+        subject_title => subject_title,
+        target => target,
         reason => a.reason.as_str(),
     }
 }
@@ -763,6 +801,7 @@ async fn feature_detail(
             body_html => Value::from_safe_string(body_html),
             commits => commits,
             adrs => adrs,
+            benchmarks => v.benchmarks.iter().filter_map(|b| st.benchmarks.get(b)).map(|b| super::perf::benchmark_row(&st, b)).collect::<Vec<_>>(),
             impl_commit => v.impl_commit.as_ref().map(|c| context! { repo => c.repo.as_str(), sha => c.sha.as_str(), short => c.sha.short(), at => v.impl_committed_at.map(|t| t.to_string()), subject => st.commits.get(c).map(|x| x.commit.subject.clone()) }),
             entity_id => f.id.as_str(),
             sources => Value::from_serialize(&st.sources),
