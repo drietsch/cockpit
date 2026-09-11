@@ -878,26 +878,23 @@ impl PatternRules {
         Some(PatternRules { matcher, heavy, cockpit: segments.contains(&".cockpit") })
     }
 
-    /// May this directory (given by name and its parent's name) be entered for this pattern?
-    fn enters(&self, name: &str, parent: Option<&str>) -> bool {
-        enters(&self.heavy, self.cockpit, name, parent)
+    /// May the directory at `comps` (root-relative components) be entered for this pattern?
+    fn enters(&self, comps: &[&str]) -> bool {
+        enters(&self.heavy, self.cockpit, comps)
     }
 
     fn accepts(&self, rel: &str) -> bool {
         if !self.matcher.is_match(rel) {
             return false;
         }
-        let mut parent: Option<&str> = None;
         let comps: Vec<&str> = rel.split('/').collect();
-        for c in &comps[..comps.len().saturating_sub(1)] {
-            if !self.enters(c, parent) {
-                return false;
-            }
-            parent = Some(c);
+        let dirs = &comps[..comps.len().saturating_sub(1)];
+        if !self.enters(dirs) {
+            return false;
         }
-        if let Some(pn) = parent {
+        if let Some(pn) = dirs.last() {
             // A file directly inside a heavy dir is never evidence unless the pattern says so.
-            if let Some((_, Some(_))) = self.heavy.iter().find(|(d, _)| *d == pn) {
+            if let Some((_, Some(_))) = self.heavy.iter().find(|(d, _)| d == pn) {
                 return false;
             }
         }
@@ -905,21 +902,25 @@ impl PatternRules {
     }
 }
 
-fn enters(
-    heavy: &[(&'static str, Option<String>)],
-    cockpit: bool,
-    name: &str,
-    parent: Option<&str>,
-) -> bool {
-    if HEAVY_DIRS.contains(&name) && !heavy.iter().any(|(d, _)| *d == name) {
-        return false;
-    }
-    if name == ".cockpit" && !cockpit {
-        return false;
-    }
-    if let Some(pn) = parent {
-        if let Some((_, Some(lit))) = heavy.iter().find(|(d, _)| *d == pn) {
-            return name == lit;
+/// Every heavy component on the path must be named by the pattern, and the component after
+/// it must be the literal child the pattern continues with (when it has one).
+fn enters(heavy: &HeavyRules, cockpit: bool, comps: &[&str]) -> bool {
+    for (i, c) in comps.iter().enumerate() {
+        if *c == ".cockpit" && !cockpit {
+            return false;
+        }
+        if HEAVY_DIRS.contains(c) {
+            match heavy.iter().find(|(d, _)| d == c) {
+                None => return false,
+                Some((_, Some(lit))) => {
+                    if let Some(next) = comps.get(i + 1) {
+                        if next != lit {
+                            return false;
+                        }
+                    }
+                }
+                Some((_, None)) => {}
+            }
         }
     }
     true
@@ -935,6 +936,21 @@ pub fn glob_many(root: &Path, patterns: &[String]) -> Vec<Vec<std::path::PathBuf
         return out;
     }
     let active: Vec<&PatternRules> = rules.iter().flatten().collect();
+    // Literal directory prefixes: a directory is entered only when it lies on the way to, or
+    // inside, at least one pattern's anchor (`core/target/nextest` for a literal path, `""` for
+    // a root-anchored `**`).
+    let anchors: Vec<String> = patterns
+        .iter()
+        .map(|p| {
+            let p = p.trim_start_matches("./");
+            let lit: String = p.split(['*', '?', '[']).next().unwrap_or("").to_string();
+            match lit.rsplit_once('/') {
+                Some((d, _)) => d.to_string(),
+                None => String::new(),
+            }
+        })
+        .collect();
+    let root_owned = root.to_path_buf();
     let mut builder = ignore::WalkBuilder::new(root);
     builder.standard_filters(false).hidden(false).follow_links(false).max_depth(Some(14));
     let for_filter: Vec<(HeavyRules, bool)> =
@@ -947,8 +963,22 @@ pub fn glob_many(root: &Path, patterns: &[String]) -> Vec<Vec<std::path::PathBuf
         if n.starts_with(".local-") || n == ".git" {
             return false;
         }
-        let parent = e.path().parent().and_then(|p| p.file_name()).map(|p| p.to_string_lossy());
-        for_filter.iter().any(|(heavy, cockpit)| enters(heavy, *cockpit, &n, parent.as_deref()))
+        let rel = e
+            .path()
+            .strip_prefix(&root_owned)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let on_the_way = anchors.iter().any(|a| {
+            a.is_empty()
+                || rel.starts_with(&format!("{a}/"))
+                || rel == *a
+                || a.starts_with(&format!("{rel}/"))
+        });
+        if !on_the_way {
+            return false;
+        }
+        let comps: Vec<&str> = rel.split('/').filter(|c| !c.is_empty()).collect();
+        for_filter.iter().any(|(heavy, cockpit)| enters(heavy, *cockpit, &comps))
     });
     for entry in builder.build().flatten() {
         let p = entry.path();
@@ -1003,4 +1033,54 @@ pub fn glob_abs(pattern: &str) -> Vec<std::path::PathBuf> {
     }
     out.sort();
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn touch(root: &Path, rel: &str) {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, "x").unwrap();
+    }
+
+    #[test]
+    fn heavy_dirs_are_entered_only_through_the_literal_child_a_pattern_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "core/target/nextest/ci/junit.xml");
+        touch(root, "core/target/debug/deps/junit.xml");
+        touch(root, "core/crates/x/junit.xml");
+        touch(root, "web/node_modules/pkg/test-results/results.json");
+        touch(root, "web/apps/a/test-results/results.json");
+        touch(root, ".cockpit/evidence/src__nextest/junit.xml");
+        touch(root, "perf/results/memory.json");
+        let pats: Vec<String> = [
+            "core/target/nextest/*/junit.xml",
+            "core/**/junit.xml",
+            "**/test-results/results.json",
+            ".cockpit/evidence/**/*.xml",
+            "**/junit.xml",
+            "perf/results/*.json",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let r = glob_many(root, &pats);
+        let names = |i: usize| -> Vec<String> {
+            r[i].iter()
+                .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().to_string())
+                .collect()
+        };
+        assert_eq!(names(0), vec!["core/target/nextest/ci/junit.xml"]);
+        // `core/**` never enters target/ at all (it does not name it) but sees crates/.
+        assert_eq!(names(1), vec!["core/crates/x/junit.xml"]);
+        // node_modules is pruned; `.cockpit` only for the pattern that names it.
+        assert_eq!(names(2), vec!["web/apps/a/test-results/results.json"]);
+        assert_eq!(names(3), vec![".cockpit/evidence/src__nextest/junit.xml"]);
+        assert_eq!(names(4), vec!["core/crates/x/junit.xml"]);
+        assert_eq!(names(5), vec!["perf/results/memory.json"]);
+        assert_eq!(glob_files(root, "**/junit.xml").len(), 1);
+    }
 }
