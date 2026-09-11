@@ -7,7 +7,7 @@ usage/config · 3 no project · 4 index error. `--json` prints exactly one docum
 
 | Command | What it does |
 |---|---|
-| `serve [--watch] [--port 4747] [--bind 127.0.0.1] [--open] [--dev] [--no-scan]` | scan, then serve the UI and the JSON API |
+| `serve [--watch] [--port 4747] [--bind 127.0.0.1] [--open] [--dev] [--no-scan] [--pull-every 15m]` | scan, then serve the UI and the JSON API; `--pull-every` runs `cockpit pull` periodically |
 | `scan [--full] [--reset-history]` | import changed files (`--full` re-reads everything; history stays unless reset) |
 | `status [--limit N]` | terminal overview: header, counts, attention, recent changes |
 | `validate [--strict]` | the gate: ID/FM/REF/ADR/EV/SUITE/PERF/CLAIM checks; exit 1 on errors; `--strict` promotes warnings |

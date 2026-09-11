@@ -65,6 +65,9 @@ pub enum Command {
         dev: bool,
         #[arg(long)]
         no_scan: bool,
+        /// Run `cockpit pull` periodically (e.g. 15m, 1h)
+        #[arg(long)]
+        pull_every: Option<String>,
     },
     /// Import project state into the index
     Scan {
@@ -186,7 +189,7 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
             doctor::run(&c, fmt)
         }
-        Command::Serve { watch, port, bind, open, dev, no_scan } => {
+        Command::Serve { watch, port, bind, open, dev, no_scan, pull_every } => {
             let mut c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
             serve::run(
                 &mut c,
@@ -197,6 +200,7 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
                     open: *open,
                     dev: *dev,
                     no_scan: *no_scan,
+                    pull_every: pull_every.clone(),
                 },
                 fmt,
             )

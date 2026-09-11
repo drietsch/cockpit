@@ -31,6 +31,8 @@ pub struct ServeOptions {
     pub open: bool,
     pub dev: bool,
     pub watch: bool,
+    /// Run `cockpit pull` at this interval (None = never).
+    pub pull_every: Option<std::time::Duration>,
 }
 
 /// Events pushed to browsers over SSE.
@@ -127,6 +129,34 @@ pub fn serve_blocking(c: &mut Cockpit, opts: ServeOptions) -> anyhow::Result<()>
     let state_handle = c.state.clone();
     let app_for_scan = app.clone();
     let watch = opts.watch;
+    // Periodic pull: a thread that fetches and then asks the scan worker for a rescan.
+    if let Some(every) = opts.pull_every {
+        let located = c.located.clone();
+        let tx = app.scan_requests.clone();
+        std::thread::spawn(move || {
+            let fmt = crate::cli::output::Format { json: true, color: false, ascii: true };
+            loop {
+                std::thread::sleep(every);
+                match crate::pull::run(
+                    &located,
+                    &crate::pull::Options { dry_run: false, force: false, only: vec![] },
+                    &fmt,
+                ) {
+                    Ok(reports) => {
+                        let pulled = reports
+                            .iter()
+                            .filter(|r| matches!(r.outcome, crate::pull::Outcome::Pulled { .. }))
+                            .count();
+                        tracing::info!("periodic pull: {pulled} new artifact(s)");
+                        if pulled > 0 {
+                            let _ = tx.blocking_send(());
+                        }
+                    }
+                    Err(e) => tracing::warn!("periodic pull failed: {e}"),
+                }
+            }
+        });
+    }
     let scan_thread = std::thread::spawn(move || {
         let mut cockpit = match Cockpit::from_located(located, Some(&index_path)) {
             Ok(k) => k,
