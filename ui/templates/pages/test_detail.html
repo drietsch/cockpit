@@ -23,6 +23,9 @@
         {% if latest.details %}<pre class="output">{{ latest.details }}</pre>{% endif %}
       </section>
       {% endif %}
+      {% if duration_chart %}
+      <section>{{ m.section('Duration') }}<div class="chart" data-chart="durationTrend" data-chart-height="140"><script type="application/json" data-chart-data>{{ duration_chart | json_script }}</script></div></section>
+      {% endif %}
       <section>{{ m.section('Runs (' ~ history | length ~ ')') }}
         <ol class="runs runs--lg" aria-label="run history">{% for r in history | reverse %}<li class="run run--{{ r.status }}" title="{{ r.at | datetime('long') }} · {{ r.status }}"><span class="sr-only">{{ r.status }}</span></li>{% endfor %}</ol>
         <table class="ledger">

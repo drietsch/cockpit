@@ -37,7 +37,7 @@
       <div class="chips">{% for r in [['30d', '30 days'], ['90d', '90 days'], ['1y', '1 year'], ['all', 'All']] %}<a class="chip-toggle{% if range == r[0] %} is-on{% endif %}" href="{{ url_for('benchmark', b.id) }}?range={{ r[0] }}{% if tab != 'history' %}&tab={{ tab }}{% endif %}">{{ r[1] }}</a>{% endfor %}</div>
     </div>
     {% if detail.chart.points | length >= 2 %}
-    <div class="chart chart--history" data-chart="lineHistory" data-chart-height="260"><script type="application/json" data-chart-data>{{ chart_json | safe }}</script><noscript><div class="muted xs">Enable JavaScript for the history chart; the table below lists every run.</div></noscript></div>
+    <div class="chart chart--history" data-chart="lineHistory" data-chart-height="260"><script type="application/json" data-chart-data>{{ chart_json | json_script }}</script><noscript><div class="muted xs">Enable JavaScript for the history chart; the table below lists every run.</div></noscript></div>
     {% else %}<div class="empty empty--calm">Only one measurement so far — a chart needs at least two runs.</div>{% endif %}
   </section>
 

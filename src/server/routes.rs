@@ -674,6 +674,17 @@ async fn test_detail(
         .collect();
     let suite = st.suites.iter().find(|s| s.id == t.test.suite);
     let run = t.latest.as_ref().and_then(|r| st_run(&st, &r.run));
+    let durations: Vec<serde_json::Value> = t
+        .history
+        .iter()
+        .rev()
+        .filter_map(|r| r.duration_ms.map(|d| serde_json::json!({ "ms": crate::time::millis(r.timestamp.value), "v": d, "status": r.status.as_str() })))
+        .collect();
+    let duration_chart = if durations.len() >= 5 {
+        Some(serde_json::json!({ "points": durations }).to_string())
+    } else {
+        None
+    };
     render(
         &app,
         &hx,
@@ -689,6 +700,7 @@ async fn test_detail(
             suite => suite.map(Value::from_serialize),
             run => run,
             duration_trend => t.duration_trend.map(|(p, l, r)| context! { previous => p, latest => l, rel => r }),
+            duration_chart => duration_chart,
             entity_id => t.test.id.as_str(),
         },
     )

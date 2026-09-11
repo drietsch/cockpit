@@ -10,7 +10,7 @@
 {% endif %}
 {% if table.regressions %}
 <section>{{ m.section('Regressions') }}
-  {% if table.regressions | length >= 3 %}<div class="chart chart--hbar" data-chart="hbar" data-chart-height="{{ ([table.regressions | length, 10] | min) * 22 + 24 }}"><script type="application/json" data-chart-data>{{ table.hbar | tojson }}</script></div>{% endif %}
+  {% if table.regressions | length >= 3 %}<div class="chart chart--hbar" data-chart="hbar" data-chart-height="{{ ([table.regressions | length, 10] | min) * 22 + 24 }}"><script type="application/json" data-chart-data>{{ table.hbar | json_script }}</script></div>{% endif %}
   {{ perf_rows(table.regressions) }}
 </section>
 {% endif %}

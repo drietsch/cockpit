@@ -20,6 +20,7 @@ pub fn register(env: &mut Environment<'static>) {
             format!("{}…", s.chars().take(n.saturating_sub(1)).collect::<String>())
         }
     });
+    env.add_filter("json_script", json_script);
     env.add_function("status_label", status_label);
     env.add_function("status_icon", status_icon);
     env.add_function("url_for", url_for);
@@ -97,6 +98,15 @@ fn pct(v: f64, digits: Option<usize>) -> String {
         ""
     };
     format!("{sign}{:.*}%", d, (v * 100.0).abs())
+}
+
+/// JSON for a `<script type="application/json">` block: `</` can never close the element.
+fn json_script(v: Value) -> Value {
+    let raw = match v.as_str() {
+        Some(s) => s.to_string(),
+        None => serde_json::to_value(&v).map(|j| j.to_string()).unwrap_or_else(|_| "null".into()),
+    };
+    Value::from_safe_string(raw.replace("</", "<\\/").replace("<!--", "<\\!--"))
 }
 
 fn markdown(s: String) -> Value {
