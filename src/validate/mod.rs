@@ -42,6 +42,12 @@ const CATALOGUE: &[(&str, Level, &str)] = &[
     ("PERF003", Level::Error, "deterministic regressions are classified (accepted) or fixed"),
     ("PERF004", Level::Warn, "semi-deterministic regressions are classified or fixed"),
     ("CLAIM001", Level::Warn, "claimed components have evidence"),
+    ("CLAIM003", Level::Warn, "a claim note's file:line citation points at a file that exists"),
+    (
+        "CLAIM004",
+        Level::Warn,
+        "a partial/planned claim whose evidence all passes is a promotion candidate",
+    ),
 ];
 
 fn level_for(code: &str, cfg: &crate::config::Config) -> Level {
@@ -217,6 +223,43 @@ pub fn run(c: &Cockpit, strict: bool, fmt: &Format) -> anyhow::Result<i32> {
         for r in f.health.reasons.iter().filter(|r| r.reason == AttentionReason::UnverifiedClaim) {
             push("CLAIM001", f.feature.id.to_string(), r.text.clone(), "policy.claims");
         }
+        // A note that cites `path/to/file.ext:NN` must still point at a file:
+        // claim notes are prose a reader trusts, and a moved or deleted file
+        // turns the citation into a false statement nobody re-checks.
+        for claim in &f.feature.claims {
+            if let Some(note) = &claim.note {
+                for cited in cited_files(note) {
+                    if !cited_file_exists(&c.located.root, &cited) {
+                        push(
+                            "CLAIM003",
+                            f.feature.id.to_string(),
+                            format!(
+                                "{}: note cites {cited}, which no repository holds",
+                                claim.component.as_str()
+                            ),
+                            "policy.claims",
+                        );
+                    }
+                }
+            }
+        }
+        // A partial or planned claim on a feature whose linked evidence all
+        // passes: either the claim is stale or the evidence proves less than
+        // it seems. Either way a person should look.
+        if f.health.state == HealthState::Healthy {
+            for claim in f.feature.claims.iter().filter(|cl| cl.status != ClaimStatus::Shipped) {
+                push(
+                    "CLAIM004",
+                    f.feature.id.to_string(),
+                    format!(
+                        "{} is claimed {} while all linked evidence passes",
+                        claim.component.as_str(),
+                        claim.status.as_str()
+                    ),
+                    "policy.claims",
+                );
+            }
+        }
     }
     for a in st.attention.iter().filter(|a| a.reason == AttentionReason::SuiteSilent) {
         push("SUITE001", a.subject.clone(), a.summary.clone(), "evidence.expect_every");
@@ -326,4 +369,86 @@ pub fn run(c: &Cockpit, strict: bool, fmt: &Format) -> anyhow::Result<i32> {
         if errors > 0 { 1 } else { 0 }
     );
     Ok(if errors > 0 { 1 } else { 0 })
+}
+
+/// `path/to/file.ext:NN` citations in a claim note (relative paths with a
+/// directory and an extension; URLs are not citations).
+fn cited_files(note: &str) -> Vec<String> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r"(?:^|[\s`(])((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\.[a-z]{1,5}):\d+")
+            .unwrap()
+    });
+    let mut out: Vec<String> = re.captures_iter(note).map(|c| c[1].to_string()).collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// A cited file exists when some file under the project root ends with the
+/// cited path. Notes cite repo-relative (`crates/x/src/y.rs`) and
+/// crate-relative (`pipeline/mod.rs`) paths alike, in a root that may hold
+/// several repositories; build output and dependencies are not walked.
+fn cited_file_exists(root: &std::path::Path, cited: &str) -> bool {
+    if root.join(cited).exists() {
+        return true;
+    }
+    let suffix = format!("/{}", cited.trim_start_matches("./"));
+    project_files(root).iter().any(|f| f.ends_with(&suffix))
+}
+
+fn project_files(root: &std::path::Path) -> &'static Vec<String> {
+    static FILES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    FILES.get_or_init(|| {
+        const SKIP: &[&str] =
+            &["target", "node_modules", ".git", ".cockpit", "dist", "out", ".next", "corpus"];
+        let mut out = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+            for e in rd.flatten() {
+                let path = e.path();
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                match e.file_type() {
+                    Ok(t) if t.is_dir() => {
+                        if !SKIP.contains(&name.as_ref()) && !name.starts_with('.') {
+                            stack.push(path);
+                        }
+                    }
+                    Ok(t) if t.is_file() => out.push(path.to_string_lossy().replace('\\', "/")),
+                    _ => {}
+                }
+            }
+        }
+        out
+    })
+}
+
+#[cfg(test)]
+mod claim_citation_tests {
+    use super::*;
+
+    #[test]
+    fn citations_are_paths_with_a_line() {
+        let note = "fixed at `crates/a/src/b.rs:12`, see (docs/x.md:3); not https://x.y/z.rs:1 nor plain.rs:9";
+        assert_eq!(
+            cited_files(note),
+            vec!["crates/a/src/b.rs".to_string(), "docs/x.md".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_citation_resolves_inside_a_sibling_repository() {
+        let root = std::env::temp_dir().join(format!("cockpit-cite-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("core/crates/a/src")).unwrap();
+        std::fs::write(root.join("core/crates/a/src/b.rs"), "").unwrap();
+        std::fs::create_dir_all(root.join("plugins/pp/crates/i/src")).unwrap();
+        std::fs::write(root.join("plugins/pp/crates/i/src/s.rs"), "").unwrap();
+        assert!(cited_file_exists(&root, "crates/a/src/b.rs"));
+        assert!(cited_file_exists(&root, "crates/i/src/s.rs"));
+        assert!(!cited_file_exists(&root, "crates/gone/src/x.rs"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
