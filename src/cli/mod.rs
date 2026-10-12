@@ -3,6 +3,7 @@
 
 pub mod attention;
 pub mod doctor;
+pub mod export;
 pub mod feature;
 pub mod init;
 pub mod output;
@@ -90,6 +91,15 @@ pub enum Command {
     },
     /// Health, reasons and evidence for one feature
     Feature { id: String },
+    /// Write every feature with its claims and health as one JSON document (cockpit.export.v1)
+    Export {
+        /// public (no notes on evidence, commits or attention) or full
+        #[arg(long, default_value = "public")]
+        profile: String,
+        /// Write to this file instead of stdout
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// Ranked attention items
     Attention {
         #[arg(long, default_value_t = 50)]
@@ -222,6 +232,10 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
         Command::Feature { id } => {
             let c = open_scanned(cli)?;
             feature::run(&c, id, fmt)
+        }
+        Command::Export { profile, out } => {
+            let c = open_scanned(cli)?;
+            export::run(&c, profile, out.as_deref(), fmt)
         }
         Command::Attention { limit, all, min_severity, feature } => {
             let c = open_scanned(cli)?;

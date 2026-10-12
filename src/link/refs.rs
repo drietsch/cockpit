@@ -117,7 +117,14 @@ impl FeatureIdIndex {
                 continue;
             }
             let resolved = self.resolve(&raw);
-            if resolved.is_some() || self.matches_pattern(&raw) || raw.contains(['-', '.']) {
+            // An unresolved bracket token is a reference only when it looks like an id: the
+            // configured pattern decides when there is one, so a Playwright project suffix
+            // such as `[journeys-gpu]` is not reported as a missing feature.
+            let looks_like_id = match &self.pattern {
+                Some(p) => p.is_match(&raw),
+                None => raw.contains(['-', '.']),
+            };
+            if resolved.is_some() || looks_like_id {
                 push(FoundRef { raw, resolved, kind: RefKind::Bracket, ambiguous: vec![] });
             }
         }
@@ -245,5 +252,14 @@ mod tests {
         let idx2 = FeatureIdIndex::build(&[f("a.b"), f("a-b")], None);
         let s = idx2.find_refs("x__feat__a_b", false);
         assert!(s[0].resolved.is_none() && s[0].ambiguous.len() == 2);
+    }
+
+    #[test]
+    fn bracket_tokens_follow_the_configured_pattern() {
+        let idx = FeatureIdIndex::build(&[f("layers.ops")], Some(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$"));
+        let r = idx.find_refs("journey › moves a layer [journeys-gpu] [layers.missing]", false);
+        let raws: Vec<&str> = r.iter().map(|x| x.raw.as_str()).collect();
+        assert!(!raws.contains(&"journeys-gpu"), "a Playwright project is not a feature id");
+        assert!(raws.contains(&"layers.missing"), "an id-shaped token is still reported");
     }
 }
