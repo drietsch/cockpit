@@ -266,7 +266,7 @@ pub fn assemble(ctx: &ImportContext, spec: BatchSpec) -> (TestBatch, Vec<String>
 /// Feature references a test carries in its own name/tags (`@feat:`, `__feat__`, `[ID]`).
 fn ctx_find_refs(r: &RawResult) -> Vec<String> {
     let mut out = Vec::new();
-    let mut text = r.name.clone();
+    let mut text = name_without_project(r).to_string();
     for t in &r.tags {
         text.push(' ');
         text.push_str(t);
@@ -283,6 +283,18 @@ fn ctx_find_refs(r: &RawResult) -> Vec<String> {
     out
 }
 
+/// A Playwright result is named `<title> [<project>]` and keyed `…::<project>`. The project
+/// is a run configuration, not a reference: `[journeys-gpu]` has the shape of a bracketed id
+/// and was read as an unknown feature on every test of that project.
+fn name_without_project(r: &RawResult) -> &str {
+    if let Some(project) = r.key.rsplit("::").next().filter(|p| !p.is_empty()) {
+        if let Some(title) = r.name.strip_suffix(&format!(" [{project}]")) {
+            return title;
+        }
+    }
+    &r.name
+}
+
 fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
@@ -292,5 +304,31 @@ fn truncate(s: &str, max: usize) -> String {
             end -= 1;
         }
         format!("{}…", &s[..end])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn result(key: &str, name: &str) -> RawResult {
+        RawResult { key: key.into(), name: name.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn a_playwright_project_suffix_is_not_a_feature_reference() {
+        let r = result(
+            "journey/text.spec.ts::types a word @feat:stories-text.text.insert::journeys-gpu",
+            "types a word @feat:stories-text.text.insert [journeys-gpu]",
+        );
+        assert_eq!(ctx_find_refs(&r), vec!["stories-text.text.insert".to_string()]);
+    }
+
+    #[test]
+    fn a_bracketed_id_in_the_title_is_still_a_reference() {
+        let r = result("x.spec.ts::draws [layers.ops]::chromium", "draws [layers.ops] [chromium]");
+        assert_eq!(ctx_find_refs(&r), vec!["layers.ops".to_string()]);
+        let plain = result("mod::tests::draws_layers", "draws [layers.ops]");
+        assert_eq!(ctx_find_refs(&plain), vec!["layers.ops".to_string()]);
     }
 }
