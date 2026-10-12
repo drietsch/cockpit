@@ -11,7 +11,7 @@ usage/config · 3 no project · 4 index error. `--json` prints exactly one docum
 | `scan [--full] [--reset-history]` | import changed files (`--full` re-reads everything; history stays unless reset) |
 | `status [--limit N]` | terminal overview: header, counts, attention, recent changes |
 | `validate [--strict]` | the gate: ID/FM/REF/ADR/EV/SUITE/PERF/CLAIM checks; exit 1 on errors; `--strict` promotes warnings |
-| `export [--profile public\|full] [--out FILE]` | every feature with its lifecycle, claims per component and evidence health as one `cockpit.export.v1` document, for publishing pipelines; `public` omits commits, attention and benchmarks |
+| `export [--profile public\|full] [--out FILE]` | every feature with its lifecycle, claims per component, evidence health and latest implementation change as one `cockpit.export.v1` document, for publishing pipelines; `public` omits commits, attention and benchmarks |
 | `feature <id>` | definition of done for one feature (`cockpit.feature.v1` with `--json`) |
 | `attention [--all] [--min-severity s] [--feature id] [--limit N]` | ranked attention items (`--all` includes informational) |
 | `doctor` | environment and project diagnostics; exit 1 on any ✕ |

@@ -73,6 +73,7 @@ pub fn run(c: &Cockpit, profile: &str, out: Option<&Path>, fmt: &Format) -> anyh
                 "state": v.health.state.as_str(),
                 "headline": v.health.headline,
                 "evidence_at": evidence_at.map(|t| t.to_string()),
+                "changed_at": v.health.impl_committed_at.map(|t| t.to_string()),
                 "tests": { "linked": v.tests.len(), "passed": passed, "failed": failed, "skipped": skipped },
             },
         });
