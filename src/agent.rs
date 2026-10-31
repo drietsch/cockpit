@@ -4,6 +4,10 @@
 //! selected checks cover the entire dependency graph. Existing CI is the gate.
 
 use anyhow::{Context, Result, bail};
+use crate::link::PathOwnership;
+use crate::model::Feature;
+use crate::paths::RelPath;
+use crate::state::ProjectState;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
@@ -47,6 +51,120 @@ pub struct Plan {
     pub authoritative_ci_required: bool,
     pub verification_status: &'static str,
     pub limitations: Vec<&'static str>,
+    /// Optional bounded hints from a previous Cockpit scan, never verification of this edit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prior_evidence: Option<PriorEvidence>,
+}
+
+
+/// Path-linked feature and test hints from a *previous* scan.
+///
+/// The test results describe past runs only. This cannot justify skipping
+/// verification of the current changed source snapshot.
+#[derive(Debug, Serialize)]
+pub struct PriorEvidence {
+    pub provenance: &'static str,
+    pub last_scan_at: Option<String>,
+    pub state: &'static str,
+    pub matched_feature_count: usize,
+    pub omitted_features: usize,
+    pub features: Vec<FeatureHint>,
+    pub linked_test_count: usize,
+    pub omitted_tests: usize,
+    pub linked_tests: Vec<LinkedTestHint>,
+    pub note: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FeatureHint {
+    pub id: String,
+    pub title: String,
+    pub importance: &'static str,
+    pub matched_paths: Vec<String>,
+    pub linked_test_count: usize,
+    pub prior_health: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LinkedTestHint {
+    pub id: String,
+    pub kind: &'static str,
+    pub source_path: Option<String>,
+    pub prior_status: Option<&'static str>,
+}
+
+fn feature_path_matches(features: &[Feature], changed: &[String]) -> BTreeMap<String, Vec<String>> {
+    let ownership = PathOwnership::build(features);
+    let mut matched = BTreeMap::<String, BTreeSet<String>>::new();
+    for p in changed {
+        for (id, _glob) in ownership.owners_of(&RelPath::new(p)) {
+            matched.entry(id.as_str().to_owned()).or_default().insert(p.clone());
+        }
+    }
+    matched.into_iter().map(|(id, paths)| (id, paths.into_iter().collect())).collect()
+}
+
+/// Enrich an already computed plan without a scan, a build, or a test.
+/// Returned test status and feature health are historical: the worktree may
+/// differ from the scan and even the same revision may have changed inputs.
+pub fn attach_prior_evidence(plan: &mut Plan, state: &ProjectState, changed: &[String]) {
+    const NOTE: &str = "Historical, potentially stale evidence only; no test was executed and no current change is verified.";
+    let last_scan_at = state.last_scan_at.map(|t| t.to_string());
+    if last_scan_at.is_none() {
+        plan.prior_evidence = Some(PriorEvidence {
+            provenance: "cockpit_prior_scan",
+            last_scan_at,
+            state: "unavailable_not_scanned",
+            matched_feature_count: 0,
+            omitted_features: 0,
+            features: Vec::new(),
+            linked_test_count: 0,
+            omitted_tests: 0,
+            linked_tests: Vec::new(),
+            note: NOTE,
+        });
+        return;
+    }
+
+    let features = state.features.values().map(|view| view.feature.clone()).collect::<Vec<_>>();
+    let matches = feature_path_matches(&features, changed);
+    let matched_feature_count = matches.len();
+    let mut selected_features = Vec::new();
+    let mut linked = BTreeMap::<String, LinkedTestHint>::new();
+    for (id, paths) in matches.iter().take(10) {
+        let Some(view) = state.feature(id) else { continue };
+        selected_features.push(FeatureHint {
+            id: id.clone(),
+            title: view.feature.title.clone(),
+            importance: view.feature.importance.as_str(),
+            matched_paths: paths.iter().take(3).cloned().collect(),
+            linked_test_count: view.tests.len(),
+            prior_health: view.health.state.as_str(),
+        });
+        for test_id in &view.tests {
+            if let Some(test) = state.tests.get(test_id) {
+                linked.entry(test_id.as_str().to_owned()).or_insert_with(|| LinkedTestHint {
+                    id: test_id.as_str().to_owned(),
+                    kind: test.test.kind.as_str(),
+                    source_path: test.test.source_path.as_ref().map(|p| p.as_str().to_owned()),
+                    prior_status: test.latest.as_ref().map(|r| r.status.as_str()),
+                });
+            }
+        }
+    }
+    let linked_test_count = linked.len();
+    plan.prior_evidence = Some(PriorEvidence {
+        provenance: "cockpit_prior_scan",
+        last_scan_at,
+        state: "historical_not_verified_for_worktree",
+        matched_feature_count,
+        omitted_features: matched_feature_count.saturating_sub(selected_features.len()),
+        features: selected_features,
+        linked_test_count,
+        omitted_tests: linked_test_count.saturating_sub(12),
+        linked_tests: linked.into_values().take(12).collect(),
+        note: NOTE,
+    });
 }
 
 #[derive(Deserialize)]
@@ -330,6 +448,7 @@ pub fn analyze(
             "No command was executed; absence of a suggested check does not prove safety.",
             "Blaze uses its own Rust toolchain; project-pinned Cargo and existing CI remain authoritative.",
         ],
+        prior_evidence: None,
     })
 }
 
@@ -396,6 +515,58 @@ mod tests {
         assert_eq!(p.projects, vec!["root"]);
         assert_eq!(p.actions[0].command, vec!["cargo", "check", "--workspace", "--all-targets"]);
         assert_eq!(p.actions[1].command, vec!["cargo", "test", "--workspace"]);
+    }
+
+    #[test]
+    fn feature_hints_match_existing_ownership_globs() {
+        let make_feature = |id: &str, patterns: &[&str]| Feature {
+            id: crate::ids::FeatureId::new(id),
+            title: id.into(),
+            description: None,
+            lifecycle: crate::model::Lifecycle::Stable,
+            importance: crate::model::Importance::Normal,
+            owners: vec![],
+            tags: vec![],
+            paths: patterns.iter().map(|p| (*p).into()).collect(),
+            adr_ids: vec![],
+            dependencies: vec![],
+            aliases: vec![],
+            claims: vec![],
+            acceptance_criteria: vec![],
+            sections: vec![],
+            body_md: String::new(),
+            since: None,
+            superseded_by: None,
+            references: vec![],
+            group: vec![],
+            source: RelPath::new("docs/features/test.md"),
+            extra: Default::default(),
+        };
+        let features = vec![
+            make_feature("A", &["modules/doc/**"]),
+            make_feature("B", &["modules/sheet/**"]),
+        ];
+        let matches = feature_path_matches(
+            &features,
+            &["modules/sheet/src/lib.rs".into(), "modules/doc/src/lib.rs".into()],
+        );
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches["B"], vec!["modules/sheet/src/lib.rs"]);
+    }
+
+    #[test]
+    fn optional_prior_evidence_never_marks_plan_verified() {
+        let t = sample();
+        let mut p = plan(t.path(), &["engine/core/src/lib.rs"], Mode::Edit, FastBackend::None);
+        let state = ProjectState::empty(crate::model::Project {
+            id: crate::ids::ProjectId::new("sample"),
+            name: "Sample".into(),
+            root: RelPath::root(),
+            repos: vec![],
+        });
+        attach_prior_evidence(&mut p, &state, &["engine/core/src/lib.rs".into()]);
+        assert_eq!(p.verification_status, "not_run");
+        assert_eq!(p.prior_evidence.as_ref().unwrap().state, "unavailable_not_scanned");
     }
 
     #[test]
