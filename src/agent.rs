@@ -3,11 +3,11 @@
 //! A plan is not test evidence. It neither executes commands nor asserts that
 //! selected checks cover the entire dependency graph. Existing CI is the gate.
 
-use anyhow::{Context, Result, bail};
 use crate::link::PathOwnership;
 use crate::model::Feature;
 use crate::paths::RelPath;
 use crate::state::ProjectState;
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
@@ -55,7 +55,6 @@ pub struct Plan {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prior_evidence: Option<PriorEvidence>,
 }
-
 
 /// Path-linked feature and test hints from a *previous* scan.
 ///
@@ -542,10 +541,8 @@ mod tests {
             source: RelPath::new("docs/features/test.md"),
             extra: Default::default(),
         };
-        let features = vec![
-            make_feature("A", &["modules/doc/**"]),
-            make_feature("B", &["modules/sheet/**"]),
-        ];
+        let features =
+            vec![make_feature("A", &["modules/doc/**"]), make_feature("B", &["modules/sheet/**"])];
         let matches = feature_path_matches(
             &features,
             &["modules/sheet/src/lib.rs".into(), "modules/doc/src/lib.rs".into()],
