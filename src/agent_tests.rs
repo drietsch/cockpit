@@ -45,8 +45,10 @@ fn playwright_config(root: &Path, source: &str) -> Option<(String, String)> {
     let relative = Path::new(source);
     if relative.is_absolute()
         || relative.components().any(|c| !matches!(c, std::path::Component::Normal(_)))
-        || !source.ends_with(".spec.ts") && !source.ends_with(".spec.tsx")
-            && !source.ends_with(".spec.js") && !source.ends_with(".spec.jsx")
+        || !source.ends_with(".spec.ts")
+            && !source.ends_with(".spec.tsx")
+            && !source.ends_with(".spec.js")
+            && !source.ends_with(".spec.jsx")
             && !source.ends_with(".spec.mts")
     {
         return None;
@@ -60,13 +62,23 @@ fn playwright_config(root: &Path, source: &str) -> Option<(String, String)> {
         if !dir.starts_with(root) {
             return None;
         }
-        if ["playwright.config.ts", "playwright.config.mts", "playwright.config.js",
-            "playwright.config.mjs", "playwright.config.cts", "playwright.config.cjs"]
-            .iter().any(|name| dir.join(name).is_file())
+        if [
+            "playwright.config.ts",
+            "playwright.config.mts",
+            "playwright.config.js",
+            "playwright.config.mjs",
+            "playwright.config.cts",
+            "playwright.config.cjs",
+        ]
+        .iter()
+        .any(|name| dir.join(name).is_file())
         {
             let cwd = dir.strip_prefix(root).ok()?.to_string_lossy();
             let file = absolute.strip_prefix(dir).ok()?.to_string_lossy();
-            return Some((if cwd.is_empty() { ".".into() } else { cwd.into_owned() }, file.into_owned()));
+            return Some((
+                if cwd.is_empty() { ".".into() } else { cwd.into_owned() },
+                file.into_owned(),
+            ));
         }
         if dir == root {
             break;
@@ -78,8 +90,10 @@ fn playwright_config(root: &Path, source: &str) -> Option<(String, String)> {
 
 fn is_playwright(kind: TestKind, file: &str) -> bool {
     matches!(kind, TestKind::E2e | TestKind::Visual | TestKind::Smoke)
-        && (file.ends_with(".spec.ts") || file.ends_with(".spec.tsx")
-            || file.ends_with(".spec.js") || file.ends_with(".spec.jsx")
+        && (file.ends_with(".spec.ts")
+            || file.ends_with(".spec.tsx")
+            || file.ends_with(".spec.js")
+            || file.ends_with(".spec.jsx")
             || file.ends_with(".spec.mts"))
 }
 
@@ -163,7 +177,9 @@ pub fn select(root: &Path, state: &ProjectState, changed: &[String]) -> TestPlan
             "smoke" => TestKind::Smoke,
             _ => continue,
         };
-        if !is_playwright(kind, path) { continue; }
+        if !is_playwright(kind, path) {
+            continue;
+        }
         if let Some((cwd, spec)) = playwright_config(root, path) {
             commands.entry((cwd.clone(), spec.clone())).or_insert(Action {
                 stage: "edit",
@@ -201,8 +217,12 @@ mod tests {
 
     fn empty_state(root: &Path) -> ProjectState {
         ProjectState::empty(Project {
-            id: "test".into(), name: "Test".into(), root: root.to_path_buf(),
-            repos: vec![], components: vec![], primary_branch: "main".into(),
+            id: "test".into(),
+            name: "Test".into(),
+            root: root.to_path_buf(),
+            repos: vec![],
+            components: vec![],
+            primary_branch: "main".into(),
         })
     }
 
