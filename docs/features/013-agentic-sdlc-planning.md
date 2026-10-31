@@ -1,0 +1,39 @@
+---
+id: FEAT-013
+title: "Agentic SDLC planning"
+status: experimental
+importance: high
+paths:
+  - src/agent.rs
+  - src/cli/plan.rs
+  - src/cli/mod.rs
+adrs:
+  - ADR-0016
+---
+
+# Agentic SDLC planning
+
+Read-only, bounded guidance for verification after source changes. The goal is
+lower end-to-end agent time and token consumption without reducing verified
+correctness or changing existing feature-health semantics.
+
+## Initial acceptance criteria
+
+- `cockpit plan --file PATH --mode edit|checkpoint|ci --json` returns one
+  `cockpit.plan.v1` document with input provenance and unexecuted suggestions.
+- Without explicit files, inspect staged, unstaged and untracked changes
+  relative to HEAD or an explicit base.
+- Map file paths to Moon project owners using longest matching project root.
+  A repo without Moon uses a root Cargo/Bun project when available.
+- Never run a check, test or build as a side effect of planning.
+- Documentation-only changes should not trigger local code checks by default.
+- Root configuration or unmapped source changes explicitly mark scope unknown.
+- Optional Blaze feedback must be labelled advisory, with Cargo/CI retained as
+  the authoritative compatibility gate.
+- No plan may introduce healthy evidence into Cockpit's state engine.
+
+## Deferred work
+
+Compiler-resolved impact graph, exact test selection, dependency-aware CI
+planning, reliable cache reuse, agent context selection, execution, and
+benchmarks against completed real development tasks.
