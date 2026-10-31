@@ -90,7 +90,9 @@ pub fn run(
     };
     let mut hard_failure = false;
     for (i, action) in plan.actions.iter().enumerate() {
-        let dir = root.join(&action.cwd).canonicalize()
+        let dir = root
+            .join(&action.cwd)
+            .canonicalize()
             .context("resolving verification working directory")?;
         if !dir.starts_with(&root) {
             bail!("verification working directory escapes project root");
@@ -100,7 +102,10 @@ pub fn run(
         };
         let filename = format!("{run_id}-{i}.log");
         let filepath = log_dir.join(&filename);
-        let log = OpenOptions::new().write(true).create_new(true).open(&filepath)
+        let log = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&filepath)
             .context("opening local verification log")?;
         let start = Instant::now();
         let result = Command::new(program)
@@ -132,7 +137,9 @@ pub fn run(
                 if action.authority != "advisory" {
                     hard_failure = true;
                 }
-                if hard_failure { break; }
+                if hard_failure {
+                    break;
+                }
                 continue;
             }
         };
@@ -157,7 +164,13 @@ pub fn run(
         fmt.json_out("cockpit.verify.v1", &c.state.load().project, &report);
     } else {
         for step in &report.steps {
-            println!("{} [{}] {} ({} ms)", step.status, step.authority, step.command.join(" "), step.duration_ms);
+            println!(
+                "{} [{}] {} ({} ms)",
+                step.status,
+                step.authority,
+                step.command.join(" "),
+                step.duration_ms
+            );
             if !step.output_tail.is_empty() {
                 println!("{}", step.output_tail);
             }
