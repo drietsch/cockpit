@@ -25,6 +25,7 @@ pub mod server;
 pub mod state;
 pub mod store;
 pub mod time;
+pub mod usage;
 pub mod validate;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

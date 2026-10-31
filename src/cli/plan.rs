@@ -13,7 +13,7 @@ pub fn run(
     fmt: &Format,
 ) -> anyhow::Result<i32> {
     let (changed, source) = agent::changes(&c.located.root, files, base)?;
-    let mut plan = agent::analyze(&c.located.root, &changed, source, mode, fast_backend)?;
+    let mut plan = agent::analyze_with_policy(&c.located.root, &changed, source, mode, fast_backend, &c.located.config.development)?;
     if include_evidence {
         agent::attach_prior_evidence(&mut plan, &c.state.load(), &changed);
     }

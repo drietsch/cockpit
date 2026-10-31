@@ -13,6 +13,7 @@ pub mod query;
 pub mod scan;
 pub mod serve;
 pub mod status;
+pub mod usage;
 
 use crate::cockpit::{Cockpit, CockpitError};
 use crate::config::ConfigError;
@@ -152,11 +153,17 @@ pub enum Command {
         #[arg(long, value_enum, default_value = "edit")]
         mode: crate::agent::Mode,
         /// none | blaze; Blaze is advisory and never a CI substitute
-        #[arg(long, value_enum, default_value = "none")]
+        #[arg(long, value_enum, default_value = "auto")]
         fast_backend: crate::agent::FastBackend,
         /// Add bounded feature/test hints from the last Cockpit scan (historical, not verification)
         #[arg(long)]
         include_evidence: bool,
+    },
+    /// Aggregate local Claude Code CLI token usage for this repository; metadata only
+    Usage {
+        /// Claude transcript root (default ~/.claude/projects)
+        #[arg(long)]
+        transcripts_dir: Option<PathBuf>,
     },
     /// Structured query over project state
     Query {
@@ -286,6 +293,10 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
         Command::Plan { files, base, mode, fast_backend, include_evidence } => {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
             plan::run(&c, files, base.as_deref(), *mode, *fast_backend, *include_evidence, fmt)
+        }
+        Command::Usage { transcripts_dir } => {
+            let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
+            usage::run(&c, transcripts_dir.as_deref(), fmt)
         }
         Command::Query { expr, format } => {
             let c = open_scanned(cli)?;

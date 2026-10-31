@@ -19,6 +19,7 @@ usage/config · 3 no project · 4 index error. `--json` prints exactly one docum
 | `migrate paged-state <dir> [--out] [--config-out] [--dry-run] [--force]` | 1:1 conversion of a paged-media/state registry |
 | `pull [--dry-run] [--force] [--source glob]… [--strict]` | fetch the newest CI artifact per `[evidence.github]` source, then rescan |
 | `plan [--file PATH]… [--base REF] [--mode edit|checkpoint|ci] [--fast-backend none|blaze] [--include-evidence]` | Read-only changed-file impact and staged verification suggestions (`cockpit.plan.v1` with `--json`); never runs builds or tests |
+| `usage [--transcripts-dir PATH]` | Opt-in, metadata-only Claude Code token/session aggregate (`cockpit.usage.v1` with `--json`) |
 | `query '<expr>' [--format table\|ids\|count\|json]` | the query language (below) |
 | `completions <shell>` | bash, zsh, fish, powershell, elvish |
 
@@ -57,3 +58,24 @@ cockpit plan --base origin/main --mode checkpoint
 Without `--file`, `plan` inspects changes against `HEAD` (or `--base`) and includes untracked non-ignored files. Paths are relative to the selected project root. `--file` and `--base` cannot be combined. The command reads a Moon project map if present and otherwise uses the root Cargo or Bun project. It does not scan the Cockpit evidence index, run a build, run tests, or invoke Blaze. `--fast-backend blaze` only proposes advisory rapid Rust feedback; it does not replace the project's pinned Cargo toolchain. Checkpoint mode proposes checks and tests for owning projects. Unknown/configuration inputs prevent claiming scoped checks are sufficient. `--mode ci` performs no local work and defers to existing CI. Path ownership is not semantic dependency analysis; all recommendations are **unverified** until executed and the authoritative CI gates are evaluated.
 
 Add `--include-evidence` to join changed paths to feature `paths:` globs and linked tests from the **last existing Cockpit scan** without rescanning or executing anything. Results are capped (10 features, 12 tests) and explicitly marked historical; prior health and test statuses do not verify changed code. No scan returns `unavailable_not_scanned`, not a green result.
+
+## Shared development and CI policy
+
+The optional `[development]` section of `cockpit.toml` governs both local planning and CI suggestions:
+
+```toml
+[development]
+rust_edit_backend = "blaze"     # none | cargo | blaze (default: none)
+rust_ci_backend = "blaze_then_cargo" # cargo | blaze_then_cargo (default: cargo)
+```
+
+`cockpit plan --mode edit` uses the configured Rust feedback backend, overridable with `--fast-backend none|cargo|blaze`. `cockpit plan --mode ci` always proposes the pinned-Cargo checks and tests for known Rust projects. When configured, Blaze is a *preflight in addition to Cargo*, never an alternative authoritative result. TypeScript uses Moon's `js-check`/`js-test` or Bun scripts. The same checked-in policy can be read in a GitHub Actions job; **existing CI workflows must explicitly run the planned commands**. No workflow is changed or invoked by the planning command itself. An empty working-tree change list in CI means consider all detectable projects; it is not treated as proof that nothing changed.
+
+## Claude Code usage metrics
+
+```sh
+cockpit --json usage
+cockpit -C /path/to/repo --json usage --transcripts-dir /path/to/claude/projects
+```
+
+This command scans local `~/.claude/projects` transcript JSONL on demand, counting only assistant records whose cwd is within the chosen repo. It aggregates model, input/output/cache tokens and observed session spans; it does **not** export prompts, tools, full transcript contents, raw message IDs or file paths. Duplicate streaming messages are deduplicated per transcript. It never estimates dollar costs from unverifiable prices, and observed session span is not active coding time. Local transcript formats can change; missing/unrecognized records are not fabricated. It does not change feature health, and is not uploaded to GitHub automatically.

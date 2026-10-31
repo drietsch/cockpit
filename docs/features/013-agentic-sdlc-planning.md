@@ -38,3 +38,16 @@ correctness or changing existing feature-health semantics.
 Compiler-resolved impact graph, exact test selection, dependency-aware CI
 planning, reliable cache reuse, agent context selection, execution, and
 benchmarks against completed real development tasks.
+
+## Rust/TypeScript and CI policy
+
+An optional `[development]` section specifies the Rust edit-time feedback engine and
+whether GitHub CI should optionally run a Blaze preflight before mandatory Cargo.
+TypeScript uses Moon/Bun; planning never executes commands.
+
+## Claude Code consumption metrics
+
+A separate opt-in `cockpit usage` CLI aggregates input/output/cache token usage,
+model and observed session spans from local Claude Code transcripts. It excludes
+prompt/tool content, never records inferred billing costs, and preserves Cockpit's
+health/evidence isolation.

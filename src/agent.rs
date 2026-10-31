@@ -3,6 +3,7 @@
 //! A plan is not test evidence. It neither executes commands nor asserts that
 //! selected checks cover the entire dependency graph. Existing CI is the gate.
 
+use crate::config::{DevelopmentSection, RustCiBackend, RustEditBackend};
 use crate::link::PathOwnership;
 use crate::model::Feature;
 use crate::paths::RelPath;
@@ -22,7 +23,10 @@ pub enum Mode {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, clap::ValueEnum)]
 pub enum FastBackend {
+    /// Apply the shared development policy from cockpit.toml.
+    Auto,
     None,
+    Cargo,
     Blaze,
 }
 
@@ -300,6 +304,18 @@ pub fn analyze(
     mode: Mode,
     fast: FastBackend,
 ) -> Result<Plan> {
+    analyze_with_policy(root, files, source, mode, fast, &DevelopmentSection::default())
+}
+
+/// Shares a checked-in verification policy between local agents and CI.
+pub fn analyze_with_policy(
+    root: &Path,
+    files: &[String],
+    source: String,
+    mode: Mode,
+    fast: FastBackend,
+    policy: &DevelopmentSection,
+) -> Result<Plan> {
     let moon = read_moon(root)?;
     let mut projects = BTreeMap::<String, Languages>::new();
     let mut unmapped = Vec::new();
@@ -353,21 +369,64 @@ pub fn analyze(
     } else {
         "no_changes"
     };
+    // In a clean CI checkout there are no uncommitted edits. The CI stage
+    // must never interpret that as "nothing needs verification".
+    if mode == Mode::Ci && files.is_empty() {
+        if let Some(ref all) = moon {
+            for (id, dir) in all {
+                let rust = root.join(dir).join("Cargo.toml").is_file();
+                let js = root.join(dir).join("package.json").is_file();
+                if rust || js {
+                    projects.insert(id.clone(), Languages { rust, js, path: dir.clone() });
+                }
+            }
+        } else {
+            let rust = root.join("Cargo.toml").is_file();
+            let js = root.join("package.json").is_file();
+            if rust || js {
+                projects.insert("root".into(), Languages { rust, js, path: ".".into() });
+            }
+        }
+    }
     let mut actions = Vec::new();
     if !uncertain {
         for lang in projects.values() {
-            if mode == Mode::Edit && fast == FastBackend::Blaze && lang.rust {
+            let selected = match fast {
+                FastBackend::Auto => match policy.rust_edit_backend {
+                    RustEditBackend::None => FastBackend::None,
+                    RustEditBackend::Cargo => FastBackend::Cargo,
+                    RustEditBackend::Blaze => FastBackend::Blaze,
+                },
+                explicit => explicit,
+            };
+            if mode == Mode::Edit && lang.rust && selected != FastBackend::None {
+                let command = match selected {
+                    FastBackend::Blaze => vec!["blaze".into(), "check".into()],
+                    _ => vec!["cargo".into(), "check".into(), "--workspace".into()],
+                };
                 actions.push(Action {
                     stage: "edit",
                     cwd: lang.path.clone(),
-                    command: vec!["blaze".into(), "check".into()],
-                    purpose: "Optional rapid Rust feedback using Blaze's own toolchain",
-                    authority: "advisory_not_a_substitute_for_pinned_cargo",
+                    command,
+                    purpose: "Optional Rust edit-time diagnostics",
+                    authority: "advisory_not_full_verification",
                     status: "recommended_not_run",
                 });
             }
         }
-        if mode == Mode::Checkpoint {
+        if mode == Mode::Checkpoint || mode == Mode::Ci {
+            if mode == Mode::Ci && policy.rust_ci_backend == RustCiBackend::BlazeThenCargo {
+                for lang in projects.values().filter(|lang| lang.rust) {
+                    actions.push(Action {
+                        stage: "ci",
+                        cwd: lang.path.clone(),
+                        command: vec!["blaze".into(), "check".into()],
+                        purpose: "Optional fast Rust preflight before mandatory pinned Cargo",
+                        authority: "advisory",
+                        status: "recommended_not_run",
+                    });
+                }
+            }
             for (id, lang) in &projects {
                 for (enabled, kind) in [(lang.rust, "rust"), (lang.js, "js")] {
                     if !enabled {
@@ -398,19 +457,19 @@ pub fn analyze(
                         "Checkpoint owning project; dependency impact is not proven"
                     };
                     actions.push(Action {
-                        stage: "checkpoint",
+                        stage: if mode == Mode::Ci { "ci" } else { "checkpoint" },
                         cwd: lang.path.clone(),
                         command: check,
                         purpose,
-                        authority: "local_check",
+                        authority: if mode == Mode::Ci { "ci_check" } else { "local_check" },
                         status: "recommended_not_run",
                     });
                     actions.push(Action {
-                        stage: "checkpoint",
+                        stage: if mode == Mode::Ci { "ci" } else { "checkpoint" },
                         cwd: lang.path.clone(),
                         command: test,
                         purpose,
-                        authority: "local_test_not_full_ci",
+                        authority: if mode == Mode::Ci { "ci_test" } else { "local_test_not_full_ci" },
                         status: "recommended_not_run",
                     });
                 }
@@ -439,13 +498,14 @@ pub fn analyze(
         unknown_inputs: unknown.into_iter().take(16).collect(),
         scope,
         actions,
-        authoritative_ci_required: changed_count != 0,
+        authoritative_ci_required: changed_count != 0 || mode == Mode::Ci,
         verification_status: "not_run",
         limitations: vec![
             "Path ownership is not compiler-resolved change-impact analysis.",
             "No symbol, dependency, generated-output or exact test coverage analysis was performed.",
             "No command was executed; absence of a suggested check does not prove safety.",
             "Blaze uses its own Rust toolchain; project-pinned Cargo and existing CI remain authoritative.",
+            "CI recommendations are not executed automatically; the existing repository workflow is the actual gate.",
         ],
         prior_evidence: None,
     })
