@@ -314,7 +314,16 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
         }
         Command::Plan { files, base, mode, fast_backend, include_evidence, select_tests } => {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
-            plan::run(&c, files, base.as_deref(), *mode, *fast_backend, *include_evidence, *select_tests, fmt)
+            plan::run(
+                &c,
+                files,
+                base.as_deref(),
+                *mode,
+                *fast_backend,
+                *include_evidence,
+                *select_tests,
+                fmt,
+            )
         }
         Command::Verify { files, base, mode, fast_backend, select_tests } => {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
