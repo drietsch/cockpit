@@ -3,16 +3,17 @@ use super::output::Format;
 use crate::agent::{self, FastBackend, Mode};
 use crate::cockpit::Cockpit;
 
-pub fn run(
-    c: &Cockpit,
-    files: &[String],
-    base: Option<&str>,
-    mode: Mode,
-    fast_backend: FastBackend,
-    include_evidence: bool,
-    select_tests: bool,
-    fmt: &Format,
-) -> anyhow::Result<i32> {
+pub struct Options<'a> {
+    pub files: &'a [String],
+    pub base: Option<&'a str>,
+    pub mode: Mode,
+    pub fast_backend: FastBackend,
+    pub include_evidence: bool,
+    pub select_tests: bool,
+}
+
+pub fn run(c: &Cockpit, options: Options<'_>, fmt: &Format) -> anyhow::Result<i32> {
+    let Options { files, base, mode, fast_backend, include_evidence, select_tests } = options;
     let (changed, source) = agent::changes(&c.located.root, files, base)?;
     let mut plan = agent::analyze_with_policy(
         &c.located.root,
