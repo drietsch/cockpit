@@ -51,3 +51,10 @@ A separate opt-in `cockpit usage` CLI aggregates input/output/cache token usage,
 model and observed session spans from local Claude Code transcripts. It excludes
 prompt/tool content, never records inferred billing costs, and preserves Cockpit's
 health/evidence isolation.
+
+## Explicit execution
+
+`cockpit verify` executes the staged plan only when explicitly invoked. It writes complete
+local logs under `.cockpit/verification` and emits a bounded result. An unrecognized
+impact scope is an error. GH Actions can call the same policy-backed command, but
+existing specialized CI gates remain separately authoritative.

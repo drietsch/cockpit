@@ -14,6 +14,7 @@ pub mod scan;
 pub mod serve;
 pub mod status;
 pub mod usage;
+pub mod verify;
 
 use crate::cockpit::{Cockpit, CockpitError};
 use crate::config::ConfigError;
@@ -165,6 +166,21 @@ pub enum Command {
         #[arg(long)]
         transcripts_dir: Option<PathBuf>,
     },
+    /// Execute selected verification commands (explicit; logs stay local)
+    Verify {
+        /// Explicit project-root-relative changed file (repeatable)
+        #[arg(long = "file")]
+        files: Vec<String>,
+        /// Compare the worktree against this revision
+        #[arg(long)]
+        base: Option<String>,
+        /// checkpoint or ci
+        #[arg(long, value_enum, default_value = "checkpoint")]
+        mode: crate::agent::Mode,
+        /// Override the shared Rust edit backend
+        #[arg(long, value_enum, default_value = "auto")]
+        fast_backend: crate::agent::FastBackend,
+    },
     /// Structured query over project state
     Query {
         expr: String,
@@ -293,6 +309,10 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
         Command::Plan { files, base, mode, fast_backend, include_evidence } => {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
             plan::run(&c, files, base.as_deref(), *mode, *fast_backend, *include_evidence, fmt)
+        }
+        Command::Verify { files, base, mode, fast_backend } => {
+            let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
+            verify::run(&c, files, base.as_deref(), *mode, *fast_backend, fmt)
         }
         Command::Usage { transcripts_dir } => {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;

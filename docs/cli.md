@@ -19,6 +19,7 @@ usage/config · 3 no project · 4 index error. `--json` prints exactly one docum
 | `migrate paged-state <dir> [--out] [--config-out] [--dry-run] [--force]` | 1:1 conversion of a paged-media/state registry |
 | `pull [--dry-run] [--force] [--source glob]… [--strict]` | fetch the newest CI artifact per `[evidence.github]` source, then rescan |
 | `plan [--file PATH]… [--base REF] [--mode edit|checkpoint|ci] [--fast-backend none|blaze] [--include-evidence]` | Read-only changed-file impact and staged verification suggestions (`cockpit.plan.v1` with `--json`); never runs builds or tests |
+| `verify [--file PATH]… [--base REF] [--mode checkpoint|ci]` | Explicitly execute policy-selected commands, with bounded output and local logs (`cockpit.verify.v1`) |
 | `usage [--transcripts-dir PATH]` | Opt-in, metadata-only Claude Code token/session aggregate (`cockpit.usage.v1` with `--json`) |
 | `query '<expr>' [--format table\|ids\|count\|json]` | the query language (below) |
 | `completions <shell>` | bash, zsh, fish, powershell, elvish |
@@ -79,3 +80,30 @@ cockpit -C /path/to/repo --json usage --transcripts-dir /path/to/claude/projects
 ```
 
 This command scans local `~/.claude/projects` transcript JSONL on demand, counting only assistant records whose cwd is within the chosen repo. It aggregates model, input/output/cache tokens and observed session spans; it does **not** export prompts, tools, full transcript contents, raw message IDs or file paths. Duplicate streaming messages are deduplicated per transcript. It never estimates dollar costs from unverifiable prices, and observed session span is not active coding time. Local transcript formats can change; missing/unrecognized records are not fabricated. It does not change feature health, and is not uploaded to GitHub automatically.
+
+## Executing the policy (opt-in)
+
+`cockpit plan` never starts processes. `cockpit verify` explicitly executes its
+checkpoint/CI recommendations, captures complete local logs in `.cockpit/verification`,
+and prints only short results or failure tails. It stops on the first non-advisory
+failure (exit 1); an optional Blaze preflight is advisory. Unknown change impact,
+missing executable, path escape, or an empty plan fail closed rather than
+reporting success. Only the selected project checks are marked passed. Existing
+repository-specific GitHub gates, WASM, browser and cross-workspace checks are
+**not** replaced by this command.
+
+```sh
+cockpit verify --mode checkpoint --file src/lib.rs
+cockpit --json verify --mode ci
+```
+
+For GitHub Actions, the same `cockpit.toml` policy is read from the checkout:
+install the pinned Cockpit binary, install the repository's required Rust/Blaze,
+Moon and Bun toolchains, and run `cockpit --json verify --mode ci` in a job.
+This invokes the discovered projects' checks and tests even in a clean CI
+checkout. Keep existing specialized CI jobs; **do not duplicate checks** when
+adopting this as their replacement. The CI checkout must provide a complete
+project mapping, otherwise verification fails rather than claiming coverage.
+
+The CLI command does not create or edit GitHub workflows. See
+`docs/agentic-sdlc.md` for adoption and limitations.

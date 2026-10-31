@@ -42,3 +42,12 @@ authoritative for projects pinned to another Rust toolchain. Existing CI stays t
 A coding agent can request a short, predictable plan without running tests. No false
 success or health status is introduced by a plan, but project mapping alone does not
 guarantee complete verification coverage.
+
+## Explicit execution extension
+
+An opt-in `cockpit verify` CLI is permitted to run the checked-in plan's commands.
+The planning path remains side-effect-free. Verification writes local logs, returns
+per-command status, fails closed for incomplete scope and does not change Cockpit
+feature health. A CI-mode result only covers the selected commands; specialized
+repository CI workflows remain authoritative. The Rust CI mode always includes
+pinned Cargo (Blaze, if enabled, is only an advisory preflight).
