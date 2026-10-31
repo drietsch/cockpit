@@ -18,7 +18,7 @@ usage/config · 3 no project · 4 index error. `--json` prints exactly one docum
 | `init [--from-cargo]` | scaffold cockpit.toml, docs/features, docs/adr (never overwrites); `--from-cargo` proposes one feature per crate layer |
 | `migrate paged-state <dir> [--out] [--config-out] [--dry-run] [--force]` | 1:1 conversion of a paged-media/state registry |
 | `pull [--dry-run] [--force] [--source glob]… [--strict]` | fetch the newest CI artifact per `[evidence.github]` source, then rescan |
-| `plan [--file PATH]… [--base REF] [--mode edit|checkpoint|ci] [--fast-backend none|blaze]` | Read-only changed-file impact and staged verification suggestions (`cockpit.plan.v1` with `--json`); never runs builds or tests |
+| `plan [--file PATH]… [--base REF] [--mode edit|checkpoint|ci] [--fast-backend none|blaze] [--include-evidence]` | Read-only changed-file impact and staged verification suggestions (`cockpit.plan.v1` with `--json`); never runs builds or tests |
 | `query '<expr>' [--format table\|ids\|count\|json]` | the query language (below) |
 | `completions <shell>` | bash, zsh, fish, powershell, elvish |
 
@@ -55,3 +55,5 @@ cockpit plan --base origin/main --mode checkpoint
 ```
 
 Without `--file`, `plan` inspects changes against `HEAD` (or `--base`) and includes untracked non-ignored files. Paths are relative to the selected project root. `--file` and `--base` cannot be combined. The command reads a Moon project map if present and otherwise uses the root Cargo or Bun project. It does not scan the Cockpit evidence index, run a build, run tests, or invoke Blaze. `--fast-backend blaze` only proposes advisory rapid Rust feedback; it does not replace the project's pinned Cargo toolchain. Checkpoint mode proposes checks and tests for owning projects. Unknown/configuration inputs prevent claiming scoped checks are sufficient. `--mode ci` performs no local work and defers to existing CI. Path ownership is not semantic dependency analysis; all recommendations are **unverified** until executed and the authoritative CI gates are evaluated.
+
+Add `--include-evidence` to join changed paths to feature `paths:` globs and linked tests from the **last existing Cockpit scan** without rescanning or executing anything. Results are capped (10 features, 12 tests) and explicitly marked historical; prior health and test statuses do not verify changed code. No scan returns `unavailable_not_scanned`, not a green result.
