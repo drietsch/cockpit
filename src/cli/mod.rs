@@ -159,6 +159,9 @@ pub enum Command {
         /// Add bounded feature/test hints from the last Cockpit scan (historical, not verification)
         #[arg(long)]
         include_evidence: bool,
+        /// Suggest exact linked Playwright spec files for fast edit-time testing
+        #[arg(long)]
+        select_tests: bool,
     },
     /// Aggregate local Claude Code CLI token usage for this repository; metadata only
     Usage {
@@ -180,6 +183,9 @@ pub enum Command {
         /// Override the shared Rust edit backend
         #[arg(long, value_enum, default_value = "auto")]
         fast_backend: crate::agent::FastBackend,
+        /// In edit mode run selected linked Playwright spec files (not a CI replacement)
+        #[arg(long)]
+        select_tests: bool,
     },
     /// Structured query over project state
     Query {
@@ -306,13 +312,13 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
             };
             init::run(&root, *from_cargo, fmt)
         }
-        Command::Plan { files, base, mode, fast_backend, include_evidence } => {
+        Command::Plan { files, base, mode, fast_backend, include_evidence, select_tests } => {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
-            plan::run(&c, files, base.as_deref(), *mode, *fast_backend, *include_evidence, fmt)
+            plan::run(&c, files, base.as_deref(), *mode, *fast_backend, *include_evidence, *select_tests, fmt)
         }
-        Command::Verify { files, base, mode, fast_backend } => {
+        Command::Verify { files, base, mode, fast_backend, select_tests } => {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
-            verify::run(&c, files, base.as_deref(), *mode, *fast_backend, fmt)
+            verify::run(&c, files, base.as_deref(), *mode, *fast_backend, *select_tests, fmt)
         }
         Command::Usage { transcripts_dir } => {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;

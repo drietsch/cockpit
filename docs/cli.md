@@ -18,7 +18,7 @@ usage/config · 3 no project · 4 index error. `--json` prints exactly one docum
 | `init [--from-cargo]` | scaffold cockpit.toml, docs/features, docs/adr (never overwrites); `--from-cargo` proposes one feature per crate layer |
 | `migrate paged-state <dir> [--out] [--config-out] [--dry-run] [--force]` | 1:1 conversion of a paged-media/state registry |
 | `pull [--dry-run] [--force] [--source glob]… [--strict]` | fetch the newest CI artifact per `[evidence.github]` source, then rescan |
-| `plan [--file PATH]… [--base REF] [--mode edit|checkpoint|ci] [--fast-backend none|blaze] [--include-evidence]` | Read-only changed-file impact and staged verification suggestions (`cockpit.plan.v1` with `--json`); never runs builds or tests |
+| `plan [--file PATH]… [--base REF] [--mode edit|checkpoint|ci] [--fast-backend auto|none|cargo|blaze] [--include-evidence] [--select-tests]` | Read-only changed-file impact and staged verification suggestions (`cockpit.plan.v1` with `--json`); never runs builds or tests |
 | `verify [--file PATH]… [--base REF] [--mode checkpoint|ci]` | Explicitly execute policy-selected commands, with bounded output and local logs (`cockpit.verify.v1`) |
 | `usage [--transcripts-dir PATH]` | Opt-in, metadata-only Claude Code token/session aggregate (`cockpit.usage.v1` with `--json`) |
 | `query '<expr>' [--format table\|ids\|count\|json]` | the query language (below) |
@@ -107,3 +107,16 @@ project mapping, otherwise verification fails rather than claiming coverage.
 
 The CLI command does not create or edit GitHub workflows. See
 `docs/agentic-sdlc.md` for adoption and limitations.
+
+## Impact-driven test selection (experimental)
+
+```sh
+cockpit --json plan --file apps/editor/src/login.tsx --mode edit --select-tests
+cockpit --json verify --file apps/editor/src/login.tsx --mode edit --select-tests
+```
+
+Test selection uses existing Cockpit feature `paths:` ownership and test links from the **last scan**. Changes directly to a recorded spec file also make it a candidate. No scanned test inventory means `unavailable_not_scanned`, not an empty proof. The machine-readable plan reports candidates, prior status, reasons, truncation, and exact runnable actions independently.
+
+Only existing `*.spec.ts(x)`/`*.spec.js(x)`/ `*.spec.mts` Playwright files with a discoverable `playwright.config.*` ancestor become executable edit-time actions. Multiple test cases in one spec are grouped to one `bunx playwright test <file>` invocation. This is **advisory targeted feedback**; it never proves other tests unaffected. `cockpit verify --mode edit --select-tests` is explicit execution and fails when no exact runnable tests are available; checkpoint and CI still run broader project checks/tests. Neither Playwright nor feature coverage is inferred from prior passing status. Unknown impacted code still requires normal verification.
+
+The verifier writes full logs to `.cockpit/verification/` and returns bounded error summaries, not huge model-context output. No test is run by `plan`.

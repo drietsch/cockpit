@@ -10,6 +10,7 @@ pub fn run(
     mode: Mode,
     fast_backend: FastBackend,
     include_evidence: bool,
+    select_tests: bool,
     fmt: &Format,
 ) -> anyhow::Result<i32> {
     let (changed, source) = agent::changes(&c.located.root, files, base)?;
@@ -23,6 +24,13 @@ pub fn run(
     )?;
     if include_evidence {
         agent::attach_prior_evidence(&mut plan, &c.state.load(), &changed);
+    }
+    if select_tests {
+        let tests = crate::agent_tests::select(&c.located.root, &c.state.load(), &changed);
+        if mode == Mode::Edit && plan.scope != "unknown" {
+            plan.actions.extend(tests.actions);
+        }
+        plan.test_selection = Some(tests.selection);
     }
     if fmt.json {
         let state = c.state.load();
@@ -47,6 +55,12 @@ pub fn run(
             println!(
                 "Prior scan: {} · {} matching features, {} linked test hints (historical only)",
                 prior.state, prior.matched_feature_count, prior.linked_test_count
+            );
+        }
+        if let Some(selection) = &plan.test_selection {
+            println!(
+                "Test selection: {} ({} linked test candidates, {} runnable Playwright specs)",
+                selection.status, selection.total_candidates, selection.runnable_actions
             );
         }
         if plan.authoritative_ci_required {

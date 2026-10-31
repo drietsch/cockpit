@@ -58,3 +58,12 @@ health/evidence isolation.
 local logs under `.cockpit/verification` and emits a bounded result. An unrecognized
 impact scope is an error. GH Actions can call the same policy-backed command, but
 existing specialized CI gates remain separately authoritative.
+
+## Impact-driven tests
+
+Read-only optional `--select-tests` exposes previous scan's feature-linked test candidates,
+prior status and exact executable Playwright spec-file actions when config discovery succeeds.
+Only explicit `cockpit verify --mode edit --select-tests` runs that subset.
+Rust nextest and TypeScript suites remain in checkpoint and CI paths.
+Selection is not exhaustive code coverage; missing mappings and past green results
+do not justify skipping authoritative checks.

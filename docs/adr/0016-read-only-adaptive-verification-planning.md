@@ -51,3 +51,10 @@ per-command status, fails closed for incomplete scope and does not change Cockpi
 feature health. A CI-mode result only covers the selected commands; specialized
 repository CI workflows remain authoritative. The Rust CI mode always includes
 pinned Cargo (Blaze, if enabled, is only an advisory preflight).
+
+### Test selection and explicit execution
+
+An opt-in path-to-feature-to-test projection may suggest exact Playwright spec files.
+It only uses tests previously imported by Cockpit and requires a local Playwright config
+before emitting a runnable action. This is fast-feedback, not a proof of impact completeness.
+Explicit execution stores logs locally and leaves existing CI authoritative.

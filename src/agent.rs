@@ -58,6 +58,9 @@ pub struct Plan {
     /// Optional bounded hints from a previous Cockpit scan, never verification of this edit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prior_evidence: Option<PriorEvidence>,
+    /// Optional bounded tests selected from prior feature links.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_selection: Option<crate::agent_tests::TestSelection>,
 }
 
 /// Path-linked feature and test hints from a *previous* scan.
@@ -512,6 +515,7 @@ pub fn analyze_with_policy(
             "CI recommendations are not executed automatically; the existing repository workflow is the actual gate.",
         ],
         prior_evidence: None,
+        test_selection: None,
     })
 }
 
