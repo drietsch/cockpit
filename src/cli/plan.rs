@@ -22,7 +22,9 @@ pub fn run(
             println!("Projects: {}", plan.projects.join(", "));
         }
         if !plan.unknown_inputs.is_empty() || !plan.unmapped_files.is_empty() {
-            println!("Scope unknown: review unmapped/configuration inputs before selecting checks.");
+            println!(
+                "Scope unknown: review unmapped/configuration inputs before selecting checks."
+            );
         }
         if plan.actions.is_empty() {
             println!("No local commands recommended at this stage.");
