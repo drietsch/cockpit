@@ -64,11 +64,16 @@ pub fn run(
     )?;
     if select_tests {
         if mode != Mode::Edit {
-            bail!("--select-tests is for fast edit-time checks; use checkpoint/CI for broader verification");
+            bail!(
+                "--select-tests is for fast edit-time checks; use checkpoint/CI for broader verification"
+            );
         }
         let selection = crate::agent_tests::select(&c.located.root, &c.state.load(), &changed);
         if selection.selection.status != "advisory_runnable_selection" {
-            bail!("no safe exact Playwright test-file selection available: {}", selection.selection.status);
+            bail!(
+                "no safe exact Playwright test-file selection available: {}",
+                selection.selection.status
+            );
         }
         plan.actions.extend(selection.actions);
     }
