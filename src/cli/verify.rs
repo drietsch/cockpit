@@ -34,6 +34,22 @@ struct Report {
     notes: Vec<&'static str>,
 }
 
+// Only the explicitly optional CI preflight is nonblocking. Edit-time
+// checks and selected tests are actionable failures when explicitly run.
+fn is_nonblocking_preflight(authority: &str) -> bool {
+    authority == "advisory"
+}
+
+fn verification_status(hard_failure: bool, advisory_failure: bool) -> &'static str {
+    if hard_failure {
+        "failed"
+    } else if advisory_failure {
+        "passed_selected_checks_with_advisory_failures"
+    } else {
+        "passed_selected_checks"
+    }
+}
+
 fn output_tail(path: &Path) -> Result<String> {
     let mut file = fs::File::open(path)?;
     let len = file.metadata()?.len();
@@ -105,6 +121,7 @@ pub fn run(
         ],
     };
     let mut hard_failure = false;
+    let mut advisory_failure = false;
     for (i, action) in plan.actions.iter().enumerate() {
         let dir = root
             .join(&action.cwd)
@@ -150,7 +167,9 @@ pub fn run(
                     output_tail: e.to_string(),
                 };
                 report.steps.push(result);
-                if action.authority != "advisory" {
+                if is_nonblocking_preflight(action.authority) {
+                    advisory_failure = true;
+                } else {
                     hard_failure = true;
                 }
                 if hard_failure {
@@ -170,12 +189,16 @@ pub fn run(
             local_log: filename,
             output_tail: if status == "failed" { output_tail(&filepath)? } else { String::new() },
         });
-        if status == "failed" && action.authority != "advisory" {
-            hard_failure = true;
-            break;
+        if status == "failed" {
+            if is_nonblocking_preflight(action.authority) {
+                advisory_failure = true;
+            } else {
+                hard_failure = true;
+                break;
+            }
         }
     }
-    report.verification_status = if hard_failure { "failed" } else { "passed_selected_checks" };
+    report.verification_status = verification_status(hard_failure, advisory_failure);
     if fmt.json {
         fmt.json_out("cockpit.verify.v1", &c.state.load().project, &report);
     } else {
@@ -194,4 +217,27 @@ pub fn run(
         println!("Result: {} (not a feature-health verdict)", report.verification_status);
     }
     Ok(if hard_failure { super::EXIT_POLICY } else { super::EXIT_OK })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_explicit_preflight_is_nonblocking() {
+        assert!(is_nonblocking_preflight("advisory"));
+        assert!(!is_nonblocking_preflight("advisory_not_full_verification"));
+        assert!(!is_nonblocking_preflight("advisory_selected_test_not_complete_coverage"));
+        assert!(!is_nonblocking_preflight("ci_test"));
+    }
+
+    #[test]
+    fn failed_preflight_cannot_claim_clean_verification() {
+        assert_eq!(verification_status(false, false), "passed_selected_checks");
+        assert_eq!(
+            verification_status(false, true),
+            "passed_selected_checks_with_advisory_failures"
+        );
+        assert_eq!(verification_status(true, true), "failed");
+    }
 }

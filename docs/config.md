@@ -122,3 +122,22 @@ Conventional sources (no `[[evidence]]`): `**/target/nextest/*/junit.xml`, `arti
 `**/test-results/junit.xml`, `**/test-results/results.json`, `.cockpit/evidence/**/*.json`
 (sniffed), `perf/results/*.json` (Guardian bench), `**/paged-measurements-*.json`,
 `**/paged-results*.json`, `**/target/criterion/**/new/estimates.json`, `**/gate.json`.
+
+## Agentic development (experimental)
+
+The optional `[development]` section configures the same Rust feedback policy for
+local Claude Code agents and GitHub CI. It does not alter feature health or run
+commands during `cockpit scan`.
+
+```toml
+[development]
+rust_edit_backend = "none"          # none | cargo | blaze (default: none)
+rust_ci_backend = "cargo"           # cargo | blaze_then_cargo (default: cargo)
+```
+
+An opt-in Blaze edit backend provides fast, advisory feedback. In CI,
+`blaze_then_cargo` adds an advisory preflight, followed by the repository's
+pinned Cargo build/check and tests. Blaze never replaces Cargo as the
+compatibility gate. See [agentic SDLC](agentic-sdlc.md) for the staged
+Rust/TypeScript/Playwright workflow, explicit `cockpit verify` execution,
+Claude Code usage metrics and limitations of path-based test selection.
