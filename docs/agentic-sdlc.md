@@ -21,6 +21,27 @@ The Rust CI backend is never Blaze-only: Blaze uses its own pinned nightly
 and may miss compiler errors. Cargo with the repository's toolchain remains
 required. TypeScript runs Moon's `js-check`/`js-test` or Bun package scripts.
 
+## Monorepos (Moon, several Cargo workspaces)
+
+```toml
+[development]
+rust_edit_backend = "blaze"
+downstream = "deep"                       # add Moon dependents of changed projects
+test_data = ["**/fixtures/**", "**/tests/golden/**", "**/locales/*.json"]
+generated = ["apps/editor/apps/canvas/feature-ids.json"]
+test_inputs = { "docs/development/surface-parity-matrix.json" = ["editor"] }
+```
+
+```sh
+cockpit --json plan --base origin/main --mode checkpoint   # merge-base diff, like the PR
+cockpit --json plan --mode edit                            # blaze check -p <crate> per workspace
+```
+
+Fixtures, translations and generated files plan their owning project's tests instead of
+blocking the plan; anything unclassified still keeps it `unknown`. Downstream expansion
+reads `dependsOn` from each `moon.yml`; it is wide by design (an engine change checks every
+module that declares it) and is still path-based, not a compiler-resolved graph.
+
 ## Local Claude Code CLI workflow
 
 ```sh

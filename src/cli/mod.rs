@@ -162,6 +162,12 @@ pub enum Command {
         /// Suggest exact linked Playwright spec files for fast edit-time testing
         #[arg(long)]
         select_tests: bool,
+        /// Dependents to add from Moon dependsOn: none | direct | deep (default: [development] downstream)
+        #[arg(long, value_enum)]
+        downstream: Option<crate::config::Downstream>,
+        /// Read the [development] policy from this cockpit.toml instead of the project's own
+        #[arg(long, env = "COCKPIT_POLICY")]
+        policy: Option<PathBuf>,
     },
     /// Aggregate local Claude Code CLI token usage for this repository; metadata only
     Usage {
@@ -186,6 +192,12 @@ pub enum Command {
         /// In edit mode run selected linked Playwright spec files (not a CI replacement)
         #[arg(long)]
         select_tests: bool,
+        /// Dependents to add from Moon dependsOn: none | direct | deep (default: [development] downstream)
+        #[arg(long, value_enum)]
+        downstream: Option<crate::config::Downstream>,
+        /// Read the [development] policy from this cockpit.toml instead of the project's own
+        #[arg(long, env = "COCKPIT_POLICY")]
+        policy: Option<PathBuf>,
     },
     /// Structured query over project state
     Query {
@@ -312,7 +324,16 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
             };
             init::run(&root, *from_cargo, fmt)
         }
-        Command::Plan { files, base, mode, fast_backend, include_evidence, select_tests } => {
+        Command::Plan {
+            files,
+            base,
+            mode,
+            fast_backend,
+            include_evidence,
+            select_tests,
+            downstream,
+            policy,
+        } => {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
             plan::run(
                 &c,
@@ -323,13 +344,27 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
                     fast_backend: *fast_backend,
                     include_evidence: *include_evidence,
                     select_tests: *select_tests,
+                    downstream: *downstream,
+                    policy: policy.as_deref(),
                 },
                 fmt,
             )
         }
-        Command::Verify { files, base, mode, fast_backend, select_tests } => {
+        Command::Verify { files, base, mode, fast_backend, select_tests, downstream, policy } => {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
-            verify::run(&c, files, base.as_deref(), *mode, *fast_backend, *select_tests, fmt)
+            let policy = plan::policy(&c, policy.as_deref(), *downstream)?;
+            verify::run(
+                &c,
+                verify::Options {
+                    files,
+                    base: base.as_deref(),
+                    mode: *mode,
+                    fast_backend: *fast_backend,
+                    select_tests: *select_tests,
+                    policy: &policy,
+                },
+                fmt,
+            )
         }
         Command::Usage { transcripts_dir } => {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;

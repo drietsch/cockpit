@@ -30,11 +30,60 @@ pub enum RustCiBackend {
     BlazeThenCargo,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// How far `cockpit plan` follows Moon `dependsOn` edges from a changed project.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum Downstream {
+    /// Only the projects that own a changed path.
+    #[default]
+    None,
+    /// Plus the projects that depend on them directly.
+    Direct,
+    /// Plus every transitive dependent.
+    Deep,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DevelopmentSection {
     pub rust_edit_backend: RustEditBackend,
     pub rust_ci_backend: RustCiBackend,
+    /// Dependents to add to a plan, read from each Moon project's `dependsOn`.
+    pub downstream: Downstream,
+    /// Repository-relative globs of test inputs (fixtures, golden files, snapshots). A match
+    /// inside a project plans that project's tests instead of making the scope unknown.
+    pub test_data: Vec<String>,
+    /// Repository-relative globs of checked-in generated files. A match inside a project plans
+    /// that project's checks and tests (and its dependents, when downstream is on).
+    pub generated: Vec<String>,
+    /// Repository-relative globs of non-Markdown documentation: no checks, like `*.md`.
+    pub documentation: Vec<String>,
+    /// Inputs that tests of other projects read, as glob → Moon project ids: a match plans
+    /// those projects' tests (for files outside any project, or read across projects).
+    pub test_inputs: BTreeMap<String, Vec<String>>,
+}
+
+/// Test-data conventions recognised without configuration.
+pub const DEFAULT_TEST_DATA: &[&str] = &[
+    "**/fixtures/**",
+    "**/__fixtures__/**",
+    "**/testdata/**",
+    "**/__snapshots__/**",
+    "**/proptest-regressions/**",
+];
+
+impl Default for DevelopmentSection {
+    fn default() -> Self {
+        DevelopmentSection {
+            rust_edit_backend: RustEditBackend::default(),
+            rust_ci_backend: RustCiBackend::default(),
+            downstream: Downstream::default(),
+            test_data: DEFAULT_TEST_DATA.iter().map(|s| (*s).to_owned()).collect(),
+            generated: Vec::new(),
+            documentation: Vec::new(),
+            test_inputs: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -937,5 +986,27 @@ EV003 = "ignore"
         let loc = Config::discover(&tmp2.path().join("src"), None).unwrap();
         assert!(loc.implicit);
         assert_eq!(loc.evidence_sources().len(), conventional_evidence().len());
+    }
+
+    #[test]
+    fn development_section_parses_planning_classes() {
+        let c = Config::parse("", Path::new("cockpit.toml")).unwrap();
+        assert_eq!(c.development.test_data, DEFAULT_TEST_DATA.to_vec());
+        assert_eq!(c.development.downstream, Downstream::None);
+        let text = r#"
+[development]
+rust_edit_backend = "blaze"
+downstream = "deep"
+test_data = ["**/fixtures/**", "**/locales/*.json"]
+generated = ["apps/editor/apps/canvas/feature-ids.json"]
+documentation = ["design/**"]
+test_inputs = { "docs/development/matrix.json" = ["editor"] }
+"#;
+        let d = Config::parse(text, Path::new("cockpit.toml")).unwrap().development;
+        assert_eq!(d.rust_edit_backend, RustEditBackend::Blaze);
+        assert_eq!(d.downstream, Downstream::Deep);
+        assert_eq!(d.test_data.len(), 2);
+        assert_eq!(d.test_inputs["docs/development/matrix.json"], vec!["editor"]);
+        assert!(Config::parse("[development]\ndownstream = \"all\"\n", Path::new("c")).is_err());
     }
 }

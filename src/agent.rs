@@ -3,13 +3,15 @@
 //! A plan is not test evidence. It neither executes commands nor asserts that
 //! selected checks cover the entire dependency graph. Existing CI is the gate.
 
-use crate::config::{DevelopmentSection, RustCiBackend, RustEditBackend};
+use crate::agent_workspace::{MoonProject, MoonProjects, read_moon};
+use crate::config::{DevelopmentSection, Downstream, RustCiBackend, RustEditBackend};
 use crate::link::PathOwnership;
 use crate::model::Feature;
 use crate::paths::RelPath;
 use crate::state::ProjectState;
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
+use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
 use std::process::Command;
@@ -47,9 +49,17 @@ pub struct Plan {
     pub changed_count: usize,
     pub changed_files: Vec<String>,
     pub omitted_changed_files: usize,
+    /// Projects that own a changed path (or, for a root lockfile, read it).
     pub projects: Vec<String>,
+    /// `none`, `direct_moon_depends_on`, `deep_moon_depends_on` or `unavailable_no_moon_workspace`.
+    pub downstream: &'static str,
+    /// Dependents added by downstream expansion; their checks are in `actions` too.
+    pub downstream_projects: Vec<String>,
+    pub path_classes: PathClasses,
     pub unmapped_files: Vec<String>,
     pub unknown_inputs: Vec<String>,
+    /// Why a file stayed unmapped, where known (bounded).
+    pub notes: Vec<String>,
     pub scope: &'static str,
     pub actions: Vec<Action>,
     pub authoritative_ci_required: bool,
@@ -173,21 +183,11 @@ pub fn attach_prior_evidence(plan: &mut Plan, state: &ProjectState, changed: &[S
     });
 }
 
-#[derive(Deserialize)]
-struct MoonWorkspace {
-    projects: BTreeMap<String, String>,
-}
-
-#[derive(Default)]
-struct Languages {
-    rust: bool,
-    js: bool,
-    path: String,
-}
-
 /// Explicit files are useful to agents that have an uncommitted edit transaction.
 /// With no explicit files, compare the worktree (including staged changes) to
-/// HEAD or the requested base and include untracked, non-ignored files.
+/// HEAD and include untracked, non-ignored files. With `base`, the comparison
+/// starts at `git merge-base <base> HEAD` (the three-dot semantics of a pull
+/// request): what the base gained after the branch forked is not this change.
 pub fn changes(
     root: &Path,
     explicit: &[String],
@@ -203,11 +203,21 @@ pub fn changes(
         }
         return Ok((files.into_iter().collect(), "explicit".into()));
     }
-    let base = base.unwrap_or("HEAD");
-    if base.starts_with('-') || base.is_empty() {
-        bail!("--base must be a git revision, not a flag");
-    }
-    let tracked = git(root, &["diff", "--name-only", "-z", "--diff-filter=ACDMRTUXB", base, "--"])?;
+    let (from, source) = match base {
+        None => ("HEAD".to_owned(), "git:HEAD+worktree".to_owned()),
+        Some(base) => {
+            if base.starts_with('-') || base.is_empty() {
+                bail!("--base must be a git revision, not a flag");
+            }
+            let merge_base = git(root, &["merge-base", base, "HEAD"])
+                .with_context(|| format!("no merge base of {base} and HEAD"))?;
+            let merge_base = String::from_utf8_lossy(&merge_base).trim().to_owned();
+            let short = merge_base.get(..12).unwrap_or(&merge_base).to_owned();
+            (merge_base, format!("git:merge-base({base})={short}+worktree"))
+        }
+    };
+    let tracked =
+        git(root, &["diff", "--name-only", "-z", "--diff-filter=ACDMRTUXB", &from, "--"])?;
     let untracked = git(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
     let mut files = BTreeSet::new();
     for bytes in [tracked, untracked] {
@@ -216,7 +226,7 @@ pub fn changes(
             files.insert(normalize(name)?);
         }
     }
-    Ok((files.into_iter().collect(), format!("git:{base}+worktree")))
+    Ok((files.into_iter().collect(), source))
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
@@ -248,45 +258,61 @@ fn normalize(name: &str) -> Result<String> {
     Ok(parts.join("/"))
 }
 
-fn read_moon(root: &Path) -> Result<Option<BTreeMap<String, String>>> {
-    let path = root.join(".moon/workspace.yml");
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let text =
-        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let workspace: MoonWorkspace =
-        serde_yaml_ng::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-    Ok(Some(workspace.projects))
-}
-
-fn owner<'a>(name: &str, projects: &'a BTreeMap<String, String>) -> Option<(&'a str, &'a str)> {
+fn owner<'a>(name: &str, projects: &'a MoonProjects) -> Option<(&'a str, &'a MoonProject)> {
     projects
         .iter()
-        .filter(|(_, dir)| {
-            let dir = dir.trim_matches('/');
-            !dir.is_empty() && (name == dir || name.starts_with(&format!("{dir}/")))
+        .filter(|(_, project)| {
+            let dir = project.dir.trim_matches('/');
+            !dir.is_empty() && dir != "." && (name == dir || name.starts_with(&format!("{dir}/")))
         })
-        .max_by_key(|(_, dir)| dir.len())
-        .map(|(id, dir)| (id.as_str(), dir.as_str()))
+        .max_by_key(|(_, project)| project.dir.len())
+        .map(|(id, project)| (id.as_str(), project))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Lang {
+    Rust,
+    Js,
+}
+
+/// A root input that every project of one language reads (a root lockfile or manifest).
+/// With a known project set it widens the plan to those projects instead of making it unknown.
+fn workspace_input(p: &str) -> Option<Lang> {
+    match p {
+        "Cargo.toml" | "Cargo.lock" | "rust-toolchain.toml" | "rust-toolchain" => Some(Lang::Rust),
+        _ if p.starts_with(".cargo/") => Some(Lang::Rust),
+        "package.json" | "bun.lock" | "bun.lockb" | "bunfig.toml" | "tsconfig.base.json"
+        | "tsconfig.json" | "package-lock.json" | "pnpm-lock.yaml" | "yarn.lock" => Some(Lang::Js),
+        _ => None,
+    }
 }
 
 fn global_input(p: &str) -> bool {
-    matches!(
-        p,
-        "Cargo.toml"
-            | "Cargo.lock"
-            | "package.json"
-            | "bun.lock"
-            | "bunfig.toml"
-            | "tsconfig.base.json"
-            | "rust-toolchain.toml"
-            | "cockpit.toml"
-            | ".mcp.json"
-    ) || p.starts_with(".cargo/")
+    workspace_input(p).is_some()
+        || matches!(p, "cockpit.toml" | ".mcp.json")
         || p.starts_with(".moon/")
         || p.starts_with(".github/")
         || p.starts_with("tooling/")
+}
+
+fn file_name(p: &str) -> &str {
+    p.rsplit('/').next().unwrap_or(p)
+}
+
+/// The language a changed file is source or build input of, by name.
+fn source_language(p: &str) -> Option<Lang> {
+    let name = file_name(p);
+    if matches!(name, "Cargo.toml" | "Cargo.lock") || name.starts_with("rust-toolchain") {
+        return Some(Lang::Rust);
+    }
+    if name == "package.json" || (name.starts_with("tsconfig") && name.ends_with(".json")) {
+        return Some(Lang::Js);
+    }
+    match Path::new(p).extension().and_then(|x| x.to_str()).unwrap_or("") {
+        "rs" => Some(Lang::Rust),
+        "ts" | "tsx" | "js" | "jsx" | "mts" | "cts" | "mjs" | "cjs" => Some(Lang::Js),
+        _ => None,
+    }
 }
 
 fn is_test(p: &str) -> bool {
@@ -296,6 +322,126 @@ fn is_test(p: &str) -> bool {
         || p.ends_with("_test.rs")
         || p.contains(".test.")
         || p.contains(".spec.")
+}
+
+fn globs(patterns: &[String]) -> Result<GlobSet> {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        let glob = GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+            .with_context(|| format!("invalid [development] glob {pattern:?}"))?;
+        builder.add(glob);
+    }
+    Ok(builder.build()?)
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct Need {
+    check: bool,
+    test: bool,
+}
+
+impl Need {
+    const ALL: Need = Need { check: true, test: true };
+    const TEST: Need = Need { check: false, test: true };
+    fn add(&mut self, other: Need) {
+        self.check |= other.check;
+        self.test |= other.test;
+    }
+    fn any(self) -> bool {
+        self.check || self.test
+    }
+}
+
+/// Why a project is in the plan, strongest first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Reason {
+    Owner,
+    Generated,
+    WorkspaceInput,
+    Downstream,
+    TestData,
+    Ci,
+}
+
+impl Reason {
+    fn purpose(self, tests_changed: bool) -> &'static str {
+        match self {
+            Reason::Owner if tests_changed => "Checkpoint changed tests and their owning project",
+            Reason::Owner => "Checkpoint owning project; dependency impact is not proven",
+            Reason::Generated => "Changed generated file: owning project's checks and tests",
+            Reason::WorkspaceInput => {
+                "Changed root lockfile or manifest: every project of that language"
+            }
+            Reason::Downstream => {
+                "Dependent of a changed project (Moon dependsOn); declared edges, not compiler-resolved"
+            }
+            Reason::TestData => "Changed test data: owning project's tests",
+            Reason::Ci => "CI: every discoverable project",
+        }
+    }
+}
+
+struct Planned {
+    path: String,
+    /// What the project can run.
+    has_rust: bool,
+    has_js: bool,
+    rust: Need,
+    js: Need,
+    reason: Reason,
+}
+
+impl Planned {
+    fn new(path: &str, has_rust: bool, has_js: bool, reason: Reason) -> Planned {
+        Planned {
+            path: path.to_owned(),
+            has_rust,
+            has_js,
+            rust: Need::default(),
+            js: Need::default(),
+            reason,
+        }
+    }
+    fn need(&mut self, lang: Option<Lang>, need: Need, reason: Reason) {
+        match lang {
+            Some(Lang::Rust) => self.rust.add(need),
+            Some(Lang::Js) => self.js.add(need),
+            None => {
+                if self.has_rust {
+                    self.rust.add(need);
+                }
+                if self.has_js {
+                    self.js.add(need);
+                }
+            }
+        }
+        self.reason = self.reason.min(reason);
+    }
+}
+
+/// Where a file belongs when the repository has no Moon workspace: the Cargo workspace that
+/// builds it, else a root Bun/npm package.
+fn fallback_owner(root: &Path, p: &str) -> Option<(String, String, bool, bool)> {
+    let dir = match crate::agent_workspace::cargo_owner(root, p) {
+        Some(owner) => owner.workspace_dir,
+        None if root.join("package.json").is_file() => ".".to_owned(),
+        None => return None,
+    };
+    let id = if dir == "." { "root".to_owned() } else { dir.clone() };
+    let has_rust = root.join(&dir).join("Cargo.toml").is_file();
+    let has_js = root.join(&dir).join("package.json").is_file();
+    Some((id, dir, has_rust, has_js))
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct PathClasses {
+    pub test_data: usize,
+    pub generated: usize,
+    pub documentation: usize,
+    /// Root lockfiles/manifests that widened the plan to every project of a language.
+    pub workspace_inputs: Vec<String>,
 }
 
 /// This planner is intentionally path-based. The impact of a changed public
@@ -320,52 +466,216 @@ pub fn analyze_with_policy(
     policy: &DevelopmentSection,
 ) -> Result<Plan> {
     let moon = read_moon(root)?;
-    let mut projects = BTreeMap::<String, Languages>::new();
+    let test_data = globs(&policy.test_data)?;
+    let generated = globs(&policy.generated)?;
+    let documentation = globs(&policy.documentation)?;
+    let test_inputs = policy
+        .test_inputs
+        .iter()
+        .map(|(pattern, ids)| Ok((globs(std::slice::from_ref(pattern))?, ids)))
+        .collect::<Result<Vec<_>>>()?;
+    let mut planned = BTreeMap::<String, Planned>::new();
     let mut unmapped = Vec::new();
     let mut unknown = Vec::new();
+    let mut notes = Vec::<String>::new();
+    let mut classes = PathClasses::default();
     let mut code_changes = false;
     let mut doc_changes = false;
+    // Rust edit feedback: Cargo workspace directory -> packages (None = the whole workspace).
+    let mut crates = BTreeMap::<String, (BTreeSet<String>, bool, bool)>::new();
     for original in files {
         let p = normalize(original)?;
+        if let (Some(lang), Some(projects)) = (workspace_input(&p), moon.as_ref()) {
+            classes.workspace_inputs.push(p.clone());
+            code_changes = true;
+            for (id, project) in projects {
+                let has = if lang == Lang::Rust { project.rust } else { project.js };
+                if has {
+                    planned
+                        .entry(id.clone())
+                        .or_insert_with(|| {
+                            Planned::new(
+                                &project.dir,
+                                project.rust,
+                                project.js,
+                                Reason::WorkspaceInput,
+                            )
+                        })
+                        .need(Some(lang), Need::ALL, Reason::WorkspaceInput);
+                }
+            }
+            continue;
+        }
         if global_input(&p) {
             unknown.push(p);
             continue;
         }
         let ext = Path::new(&p).extension().and_then(|x| x.to_str()).unwrap_or("");
-        let rust = ext == "rs";
-        let js = matches!(ext, "ts" | "tsx" | "js" | "jsx" | "mts" | "cts" | "mjs" | "cjs");
-        if ext == "md" || ext == "mdx" {
+        if ext == "md" || ext == "mdx" || documentation.is_match(&p) {
             doc_changes = true;
+            classes.documentation += 1;
             continue;
         }
-        if !rust && !js {
-            unknown.push(p);
+        let consumers: Vec<&String> =
+            test_inputs.iter().filter(|(g, _)| g.is_match(&p)).flat_map(|(_, ids)| *ids).collect();
+        if !consumers.is_empty() {
+            let mut mapped = true;
+            for id in consumers {
+                let project = moon.as_ref().and_then(|projects| projects.get(id));
+                match project.filter(|project| project.rust || project.js) {
+                    Some(project) => {
+                        planned
+                            .entry(id.clone())
+                            .or_insert_with(|| {
+                                Planned::new(
+                                    &project.dir,
+                                    project.rust,
+                                    project.js,
+                                    Reason::TestData,
+                                )
+                            })
+                            .need(None, Need::TEST, Reason::TestData);
+                    }
+                    None => {
+                        mapped = false;
+                        if notes.len() < 16 {
+                            notes.push(format!("{p}: test_inputs names unknown project {id}"));
+                        }
+                    }
+                }
+            }
+            if mapped {
+                classes.test_data += 1;
+            } else {
+                unmapped.push(p);
+            }
             continue;
         }
-        code_changes = true;
-        let mapping = if let Some(ref available) = moon {
-            owner(&p, available).map(|(id, dir)| (id.to_owned(), dir.to_owned()))
-        } else if root.join("Cargo.toml").is_file() || root.join("package.json").is_file() {
-            Some(("root".into(), ".".into()))
+        let class = if test_data.is_match(&p) {
+            Some(Reason::TestData)
+        } else if generated.is_match(&p) {
+            Some(Reason::Generated)
         } else {
             None
         };
-        if let Some((id, dir)) = mapping {
-            let entry = projects.entry(id).or_default();
-            entry.path = dir;
-            entry.rust |= rust;
-            entry.js |= js;
+        let lang = source_language(&p);
+        if class.is_none() && lang.is_none() {
+            unknown.push(p);
+            continue;
+        }
+        let owning = if let Some(ref projects) = moon {
+            owner(&p, projects).map(|(id, project)| {
+                if project.languages_from == "unknown" {
+                    // Nothing declares the project's languages: trust the source extension.
+                    let (rust, js) = (lang == Some(Lang::Rust), lang == Some(Lang::Js));
+                    (id.to_owned(), project.dir.clone(), rust, js)
+                } else {
+                    (id.to_owned(), project.dir.clone(), project.rust, project.js)
+                }
+            })
         } else {
+            fallback_owner(root, &p)
+        };
+        let Some((id, dir, has_rust, has_js)) = owning else {
             unmapped.push(p);
+            continue;
+        };
+        match class {
+            Some(_) if !has_rust && !has_js => {
+                if notes.len() < 16 {
+                    notes.push(format!("{p}: owning project {id} declares no Rust or JS tasks"));
+                }
+                unmapped.push(p);
+            }
+            Some(reason) => {
+                if reason == Reason::TestData {
+                    classes.test_data += 1;
+                } else {
+                    classes.generated += 1;
+                    code_changes = true;
+                }
+                let need = if reason == Reason::TestData { Need::TEST } else { Need::ALL };
+                planned
+                    .entry(id)
+                    .or_insert_with(|| Planned::new(&dir, has_rust, has_js, reason))
+                    .need(None, need, reason);
+            }
+            None => {
+                let lang = lang.expect("classified above");
+                let has = if lang == Lang::Rust { has_rust } else { has_js };
+                if !has {
+                    if notes.len() < 16 {
+                        let kind = if lang == Lang::Rust { "Rust" } else { "JS/TS" };
+                        notes.push(format!("{p}: owning project {id} has no {kind} tasks"));
+                    }
+                    unmapped.push(p);
+                    continue;
+                }
+                code_changes = true;
+                planned
+                    .entry(id)
+                    .or_insert_with(|| Planned::new(&dir, has_rust, has_js, Reason::Owner))
+                    .need(Some(lang), Need::ALL, Reason::Owner);
+                if lang == Lang::Rust {
+                    if let Some(cargo) = crate::agent_workspace::cargo_owner(root, &p) {
+                        let entry = crates.entry(cargo.workspace_dir).or_default();
+                        match cargo.package {
+                            Some(package) => {
+                                entry.0.insert(package);
+                            }
+                            None => entry.1 = true,
+                        }
+                        entry.2 |= is_test(&p);
+                    }
+                }
+            }
         }
     }
     // An unmatched source or a root build/config input can affect any project.
     let uncertain = !unmapped.is_empty() || !unknown.is_empty();
+    let owning_projects: Vec<String> = planned.keys().cloned().collect();
+    let mut downstream_projects = Vec::new();
+    let downstream = match (&moon, policy.downstream) {
+        (_, Downstream::None) => "none",
+        (None, _) => "unavailable_no_moon_workspace",
+        (Some(projects), depth) => {
+            // Expand from changed code and generated files only: test data reaches only its own
+            // project's tests, and a root lockfile already lists every project it touches (a
+            // project listed for it alone still gets its full checks as a dependent).
+            let sources: BTreeSet<String> = planned
+                .iter()
+                .filter(|(_, p)| matches!(p.reason, Reason::Owner | Reason::Generated))
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in
+                crate::agent_workspace::dependents(projects, &sources, depth == Downstream::Deep)
+            {
+                let project = &projects[&id];
+                if !(project.rust || project.js) {
+                    continue;
+                }
+                let entry = planned.entry(id.clone()).or_insert_with(|| {
+                    Planned::new(&project.dir, project.rust, project.js, Reason::Downstream)
+                });
+                entry.need(None, Need::ALL, Reason::Downstream);
+                if !owning_projects.contains(&id) {
+                    downstream_projects.push(id);
+                }
+            }
+            if depth == Downstream::Deep {
+                "deep_moon_depends_on"
+            } else {
+                "direct_moon_depends_on"
+            }
+        }
+    };
     let scope = if uncertain {
         "unknown"
-    } else if projects.len() > 1 {
+    } else if !classes.workspace_inputs.is_empty() {
+        "workspace_wide_path_based"
+    } else if planned.len() > 1 {
         "multiple_projects_path_based"
-    } else if code_changes {
+    } else if !planned.is_empty() || code_changes {
         "project_path_based"
     } else if doc_changes {
         "documentation_only_path_based"
@@ -376,65 +686,88 @@ pub fn analyze_with_policy(
     // must never interpret that as "nothing needs verification".
     if mode == Mode::Ci && files.is_empty() {
         if let Some(ref all) = moon {
-            for (id, dir) in all {
-                let rust = root.join(dir).join("Cargo.toml").is_file();
-                let js = root.join(dir).join("package.json").is_file();
-                if rust || js {
-                    projects.insert(id.clone(), Languages { rust, js, path: dir.clone() });
+            for (id, project) in all {
+                if project.rust || project.js {
+                    planned
+                        .entry(id.clone())
+                        .or_insert_with(|| {
+                            Planned::new(&project.dir, project.rust, project.js, Reason::Ci)
+                        })
+                        .need(None, Need::ALL, Reason::Ci);
                 }
             }
         } else {
             let rust = root.join("Cargo.toml").is_file();
             let js = root.join("package.json").is_file();
             if rust || js {
-                projects.insert("root".into(), Languages { rust, js, path: ".".into() });
+                planned
+                    .entry("root".into())
+                    .or_insert_with(|| Planned::new(".", rust, js, Reason::Ci))
+                    .need(None, Need::ALL, Reason::Ci);
             }
         }
     }
+    let tests_changed = files.iter().any(|p| is_test(p));
     let mut actions = Vec::new();
-    if !uncertain {
-        for lang in projects.values() {
-            let selected = match fast {
-                FastBackend::Auto => match policy.rust_edit_backend {
-                    RustEditBackend::None => FastBackend::None,
-                    RustEditBackend::Cargo => FastBackend::Cargo,
-                    RustEditBackend::Blaze => FastBackend::Blaze,
-                },
-                explicit => explicit,
+    let selected = match fast {
+        FastBackend::Auto => match policy.rust_edit_backend {
+            RustEditBackend::None => FastBackend::None,
+            RustEditBackend::Cargo => FastBackend::Cargo,
+            RustEditBackend::Blaze => FastBackend::Blaze,
+        },
+        explicit => explicit,
+    };
+    // Edit-time diagnostics are advisory and scoped to the changed crates, in the Cargo
+    // workspace that builds them. They never claim the change is verified, so an unknown
+    // scope does not withhold them (it still withholds checkpoint and CI suggestions).
+    if mode == Mode::Edit && selected != FastBackend::None {
+        for (dir, (packages, whole, tests)) in &crates {
+            let mut command: Vec<String> = match selected {
+                FastBackend::Blaze => vec!["blaze".into(), "check".into()],
+                _ => vec!["cargo".into(), "check".into()],
             };
-            if mode == Mode::Edit && lang.rust && selected != FastBackend::None {
-                let command = match selected {
-                    FastBackend::Blaze => vec!["blaze".into(), "check".into()],
-                    _ => vec!["cargo".into(), "check".into(), "--workspace".into()],
-                };
+            if *whole || packages.is_empty() {
+                command.push("--workspace".into());
+            } else {
+                for package in packages {
+                    command.push("-p".into());
+                    command.push(package.clone());
+                }
+            }
+            if *tests {
+                command.push("--all-targets".into());
+            }
+            actions.push(Action {
+                stage: "edit",
+                cwd: dir.clone(),
+                command,
+                purpose: "Optional Rust edit-time diagnostics for the changed crates",
+                authority: "advisory_not_full_verification",
+                status: "recommended_not_run",
+            });
+        }
+    }
+    if !uncertain && (mode == Mode::Checkpoint || mode == Mode::Ci) {
+        if mode == Mode::Ci && policy.rust_ci_backend == RustCiBackend::BlazeThenCargo {
+            for project in planned.values().filter(|p| p.rust.check) {
                 actions.push(Action {
-                    stage: "edit",
-                    cwd: lang.path.clone(),
-                    command,
-                    purpose: "Optional Rust edit-time diagnostics",
-                    authority: "advisory_not_full_verification",
+                    stage: "ci",
+                    cwd: project.path.clone(),
+                    command: vec!["blaze".into(), "check".into()],
+                    purpose: "Optional fast Rust preflight before mandatory pinned Cargo",
+                    authority: "advisory",
                     status: "recommended_not_run",
                 });
             }
         }
-        if mode == Mode::Checkpoint || mode == Mode::Ci {
-            if mode == Mode::Ci && policy.rust_ci_backend == RustCiBackend::BlazeThenCargo {
-                for lang in projects.values().filter(|lang| lang.rust) {
-                    actions.push(Action {
-                        stage: "ci",
-                        cwd: lang.path.clone(),
-                        command: vec!["blaze".into(), "check".into()],
-                        purpose: "Optional fast Rust preflight before mandatory pinned Cargo",
-                        authority: "advisory",
-                        status: "recommended_not_run",
-                    });
+        for (id, project) in &planned {
+            for (need, kind) in [(project.rust, "rust"), (project.js, "js")] {
+                if !need.any() {
+                    continue;
                 }
-            }
-            for (id, lang) in &projects {
-                for (enabled, kind) in [(lang.rust, "rust"), (lang.js, "js")] {
-                    if !enabled {
-                        continue;
-                    }
+                let purpose = project.reason.purpose(tests_changed);
+                let stage = if mode == Mode::Ci { "ci" } else { "checkpoint" };
+                if need.check {
                     let check = if moon.is_some() {
                         vec!["moon".into(), "run".into(), format!("{id}:{kind}-check")]
                     } else if kind == "rust" {
@@ -447,6 +780,16 @@ pub fn analyze_with_policy(
                     } else {
                         vec!["bun".into(), "run".into(), "typecheck".into()]
                     };
+                    actions.push(Action {
+                        stage,
+                        cwd: project.path.clone(),
+                        command: check,
+                        purpose,
+                        authority: if mode == Mode::Ci { "ci_check" } else { "local_check" },
+                        status: "recommended_not_run",
+                    });
+                }
+                if need.test {
                     let test = if moon.is_some() {
                         vec!["moon".into(), "run".into(), format!("{id}:{kind}-test")]
                     } else if kind == "rust" {
@@ -454,22 +797,9 @@ pub fn analyze_with_policy(
                     } else {
                         vec!["bun".into(), "run".into(), "test".into()]
                     };
-                    let purpose = if files.iter().any(|p| is_test(p)) {
-                        "Checkpoint changed tests and their owning project"
-                    } else {
-                        "Checkpoint owning project; dependency impact is not proven"
-                    };
                     actions.push(Action {
-                        stage: if mode == Mode::Ci { "ci" } else { "checkpoint" },
-                        cwd: lang.path.clone(),
-                        command: check,
-                        purpose,
-                        authority: if mode == Mode::Ci { "ci_check" } else { "local_check" },
-                        status: "recommended_not_run",
-                    });
-                    actions.push(Action {
-                        stage: if mode == Mode::Ci { "ci" } else { "checkpoint" },
-                        cwd: lang.path.clone(),
+                        stage,
+                        cwd: project.path.clone(),
                         command: test,
                         purpose,
                         authority: if mode == Mode::Ci {
@@ -490,6 +820,12 @@ pub fn analyze_with_policy(
     let changed_count = all.len();
     let changed_files = all.iter().take(32).cloned().collect::<Vec<_>>();
     let omitted_changed_files = changed_count.saturating_sub(changed_files.len());
+    classes.workspace_inputs.truncate(16);
+    let projects = if mode == Mode::Ci && files.is_empty() {
+        planned.keys().cloned().collect()
+    } else {
+        owning_projects
+    };
     Ok(Plan {
         mode: match mode {
             Mode::Edit => "edit",
@@ -500,16 +836,21 @@ pub fn analyze_with_policy(
         changed_count,
         changed_files,
         omitted_changed_files,
-        projects: projects.keys().cloned().collect(),
+        projects,
+        downstream,
+        downstream_projects,
+        path_classes: classes,
         unmapped_files: unmapped.into_iter().take(16).collect(),
         unknown_inputs: unknown.into_iter().take(16).collect(),
+        notes,
         scope,
         actions,
         authoritative_ci_required: changed_count != 0 || mode == Mode::Ci,
         verification_status: "not_run",
         limitations: vec![
             "Path ownership is not compiler-resolved change-impact analysis.",
-            "No symbol, dependency, generated-output or exact test coverage analysis was performed.",
+            "Downstream projects, when listed, come from declared Moon dependsOn edges, not a resolved build graph.",
+            "Test-data and generated-file classes come from configured globs; an unmatched non-source file keeps the scope unknown.",
             "No command was executed; absence of a suggested check does not prove safety.",
             "Blaze uses its own Rust toolchain; project-pinned Cargo and existing CI remain authoritative.",
             "CI recommendations are not executed automatically; the existing repository workflow is the actual gate.",
@@ -523,6 +864,58 @@ pub fn analyze_with_policy(
 mod tests {
     use super::*;
     use std::fs;
+
+    fn write(root: &Path, path: &str, text: &str) {
+        let path = root.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    /// A paged-like monorepo: per-project Cargo workspaces, Moon tags and dependsOn.
+    fn monorepo() -> tempfile::TempDir {
+        let t = tempfile::tempdir().unwrap();
+        let r = t.path();
+        write(
+            r,
+            ".moon/workspace.yml",
+            "projects:\n  core: engine/core\n  image: modules/image\n  editor: apps/editor\n  tests: tests\n",
+        );
+        write(r, "engine/core/moon.yml", "language: rust\ntags: [rust]\n");
+        write(r, "engine/core/package.json", "{}");
+        write(r, "engine/core/Cargo.toml", "[workspace]\nmembers = [\"crates/*\"]\n");
+        write(r, "engine/core/crates/geom/Cargo.toml", "[package]\nname = \"paged-geom\"\n");
+        write(r, "engine/core/crates/wire/Cargo.toml", "[package]\nname = \"paged-wire\"\n");
+        write(
+            r,
+            "modules/image/moon.yml",
+            "tags: [rust, node]\ndependsOn:\n  - id: core\n    scope: production\n",
+        );
+        write(r, "modules/image/Cargo.toml", "[workspace]\nmembers = [\"image-psd\"]\n");
+        write(r, "modules/image/image-psd/Cargo.toml", "[package]\nname = \"image-psd\"\n");
+        write(
+            r,
+            "apps/editor/moon.yml",
+            "language: typescript\ntags: [node]\ndependsOn: [core, image]\n",
+        );
+        write(r, "tests/moon.yml", "tags: [node]\ndependsOn:\n  - editor\n");
+        t
+    }
+
+    fn plan_with(root: &Path, paths: &[&str], mode: Mode, policy: &DevelopmentSection) -> Plan {
+        analyze_with_policy(
+            root,
+            &paths.iter().map(|x| x.to_string()).collect::<Vec<_>>(),
+            "test".into(),
+            mode,
+            FastBackend::Auto,
+            policy,
+        )
+        .unwrap()
+    }
+
+    fn commands(p: &Plan) -> Vec<String> {
+        p.actions.iter().map(|a| format!("({}) {}", a.cwd, a.command.join(" "))).collect()
+    }
 
     fn sample() -> tempfile::TempDir {
         let t = tempfile::tempdir().unwrap();
@@ -671,7 +1064,7 @@ mod tests {
         let t = sample();
         let p = plan(
             t.path(),
-            &["bun.lock", "modules/sheet/src/lib.rs"],
+            &[".github/workflows/ci.yml", "modules/sheet/src/lib.rs"],
             Mode::Checkpoint,
             FastBackend::None,
         );
@@ -683,10 +1076,12 @@ mod tests {
     #[test]
     fn blaze_is_opt_in_and_advisory() {
         let t = sample();
+        write(t.path(), "engine/core/Cargo.toml", "[package]\nname = \"core\"\n[workspace]\n");
         let files = &["engine/core/src/lib.rs"];
         assert!(plan(t.path(), files, Mode::Edit, FastBackend::None).actions.is_empty());
         let p = plan(t.path(), files, Mode::Edit, FastBackend::Blaze);
-        assert_eq!(p.actions[0].command, vec!["blaze", "check"]);
+        assert_eq!(p.actions[0].command, vec!["blaze", "check", "-p", "core"]);
+        assert_eq!(p.actions[0].cwd, "engine/core");
         assert!(p.actions[0].authority.starts_with("advisory"));
     }
 
@@ -707,5 +1102,243 @@ mod tests {
         assert_eq!(p.scope, "no_changes");
         assert!(!p.authoritative_ci_required);
         assert_eq!(p.verification_status, "not_run");
+    }
+
+    #[test]
+    fn base_diffs_from_the_merge_base() {
+        let t = tempfile::tempdir().unwrap();
+        let run = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(t.path())
+                .args(["-c", "user.name=Test", "-c", "user.email=test@example.org"])
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        run(&["init", "-q", "-b", "main"]);
+        fs::write(t.path().join("shared.rs"), "fn a() {}\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-q", "-m", "fork point"]);
+        run(&["checkout", "-q", "-b", "topic"]);
+        fs::write(t.path().join("mine.rs"), "fn mine() {}\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-q", "-m", "topic work"]);
+        run(&["checkout", "-q", "main"]);
+        fs::write(t.path().join("theirs.rs"), "fn theirs() {}\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-q", "-m", "main moved on"]);
+        run(&["checkout", "-q", "topic"]);
+        let (files, source) = changes(t.path(), &[], Some("main")).unwrap();
+        // theirs.rs is what main gained after the fork, not this branch's change.
+        assert_eq!(files, vec!["mine.rs"]);
+        assert!(source.starts_with("git:merge-base(main)="), "{source}");
+        assert!(changes(t.path(), &[], Some("no-such-ref")).is_err());
+    }
+
+    #[test]
+    fn languages_come_from_moon_tags_not_extensions() {
+        let t = monorepo();
+        let policy = DevelopmentSection::default();
+        // core has a package.json, but Moon gives it only the rust-* tasks.
+        let p =
+            plan_with(t.path(), &["engine/core/packages/wasm/index.ts"], Mode::Checkpoint, &policy);
+        assert_eq!(p.scope, "unknown");
+        assert_eq!(p.unmapped_files, vec!["engine/core/packages/wasm/index.ts"]);
+        assert!(p.notes[0].contains("core has no JS/TS tasks"), "{:?}", p.notes);
+        let p = plan_with(t.path(), &["modules/image/glue/src/a.ts"], Mode::Checkpoint, &policy);
+        assert_eq!(
+            commands(&p),
+            vec![
+                "(modules/image) moon run image:js-check",
+                "(modules/image) moon run image:js-test"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_data_runs_the_owning_projects_tests_only() {
+        let t = monorepo();
+        let policy = DevelopmentSection { downstream: Downstream::Deep, ..Default::default() };
+        let p = plan_with(
+            t.path(),
+            &[
+                "modules/image/conformance/fixtures/gray-8.psd",
+                "modules/image/conformance/fixtures/x.json",
+            ],
+            Mode::Checkpoint,
+            &policy,
+        );
+        assert_eq!(p.scope, "project_path_based");
+        assert_eq!(p.path_classes.test_data, 2);
+        assert!(p.downstream_projects.is_empty(), "test data does not reach dependents");
+        assert_eq!(
+            commands(&p),
+            vec![
+                "(modules/image) moon run image:rust-test",
+                "(modules/image) moon run image:js-test"
+            ]
+        );
+        // The same kind of file outside a test-data glob stays unknown: fail closed.
+        let p =
+            plan_with(t.path(), &["modules/image/assets/gray-8.psd"], Mode::Checkpoint, &policy);
+        assert_eq!(p.scope, "unknown");
+        assert!(p.actions.is_empty());
+    }
+
+    #[test]
+    fn configured_generated_and_documentation_globs() {
+        let t = monorepo();
+        let policy = DevelopmentSection {
+            generated: vec!["apps/editor/**/feature-ids.json".into(), "**/locales/*.json".into()],
+            documentation: vec!["docs/**/*.svg".into()],
+            ..Default::default()
+        };
+        let p = plan_with(
+            t.path(),
+            &[
+                "apps/editor/apps/canvas/feature-ids.json",
+                "modules/image/glue/locales/de.json",
+                "docs/development/diagram.svg",
+            ],
+            Mode::Checkpoint,
+            &policy,
+        );
+        assert_eq!(p.scope, "multiple_projects_path_based");
+        assert_eq!((p.path_classes.generated, p.path_classes.documentation), (2, 1));
+        assert_eq!(
+            commands(&p),
+            vec![
+                "(apps/editor) moon run editor:js-check",
+                "(apps/editor) moon run editor:js-test",
+                "(modules/image) moon run image:rust-check",
+                "(modules/image) moon run image:rust-test",
+                "(modules/image) moon run image:js-check",
+                "(modules/image) moon run image:js-test",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_inputs_reach_the_named_projects_tests() {
+        let t = monorepo();
+        let mut policy = DevelopmentSection::default();
+        let file = "docs/development/matrix.json";
+        // Outside every project and unconfigured: unknown.
+        assert_eq!(plan_with(t.path(), &[file], Mode::Checkpoint, &policy).scope, "unknown");
+        policy.test_inputs.insert("docs/development/*.json".into(), vec!["editor".into()]);
+        let p = plan_with(t.path(), &[file], Mode::Checkpoint, &policy);
+        assert_eq!(p.scope, "project_path_based");
+        assert_eq!(commands(&p), vec!["(apps/editor) moon run editor:js-test"]);
+        policy.test_inputs.insert("docs/development/*.json".into(), vec!["nope".into()]);
+        let p = plan_with(t.path(), &[file], Mode::Checkpoint, &policy);
+        assert_eq!(p.scope, "unknown");
+        assert!(p.notes[0].contains("unknown project nope"));
+    }
+
+    #[test]
+    fn root_lockfile_widens_to_every_project_of_its_language() {
+        let t = monorepo();
+        let p =
+            plan_with(t.path(), &["bun.lock"], Mode::Checkpoint, &DevelopmentSection::default());
+        assert_eq!(p.scope, "workspace_wide_path_based");
+        assert_eq!(p.path_classes.workspace_inputs, vec!["bun.lock"]);
+        assert_eq!(p.projects, vec!["editor", "image", "tests"]);
+        assert!(commands(&p).iter().all(|c| c.contains(":js-")), "{:?}", commands(&p));
+    }
+
+    #[test]
+    fn downstream_expansion_follows_depends_on() {
+        let t = monorepo();
+        let files = &["engine/core/crates/geom/src/lib.rs"];
+        let mut policy = DevelopmentSection::default();
+        let p = plan_with(t.path(), files, Mode::Checkpoint, &policy);
+        assert_eq!((p.downstream, p.downstream_projects.len()), ("none", 0));
+        policy.downstream = Downstream::Direct;
+        let p = plan_with(t.path(), files, Mode::Checkpoint, &policy);
+        assert_eq!(p.downstream_projects, vec!["editor", "image"]);
+        policy.downstream = Downstream::Deep;
+        let p = plan_with(t.path(), files, Mode::Checkpoint, &policy);
+        assert_eq!(p.downstream, "deep_moon_depends_on");
+        assert_eq!(p.projects, vec!["core"]);
+        assert_eq!(p.downstream_projects, vec!["editor", "image", "tests"]);
+        assert!(commands(&p).contains(&"(tests) moon run tests:js-test".to_owned()));
+        assert!(commands(&p).contains(&"(modules/image) moon run image:rust-check".to_owned()));
+        // A dependent with a JS-only change of its own still gets its Rust half checked.
+        let p = plan_with(
+            t.path(),
+            &[files[0], "modules/image/glue/src/a.ts"],
+            Mode::Checkpoint,
+            &policy,
+        );
+        assert_eq!(p.projects, vec!["core", "image"]);
+        assert_eq!(p.downstream_projects, vec!["editor", "tests"]);
+        assert!(commands(&p).contains(&"(modules/image) moon run image:rust-check".to_owned()));
+        // A dependent first listed for a root lockfile still gets its Rust checks.
+        let p = plan_with(t.path(), &["bun.lock", files[0]], Mode::Checkpoint, &policy);
+        assert_eq!(p.scope, "workspace_wide_path_based");
+        assert_eq!(p.downstream_projects, Vec::<String>::new());
+        assert!(commands(&p).contains(&"(modules/image) moon run image:rust-test".to_owned()));
+        assert!(commands(&p).contains(&"(modules/image) moon run image:js-test".to_owned()));
+    }
+
+    #[test]
+    fn edit_checks_name_changed_crates_in_their_cargo_workspace() {
+        let t = monorepo();
+        let mut policy =
+            DevelopmentSection { rust_edit_backend: RustEditBackend::Blaze, ..Default::default() };
+        let p = plan_with(
+            t.path(),
+            &[
+                "engine/core/crates/geom/src/lib.rs",
+                "engine/core/crates/wire/tests/roundtrip.rs",
+                "modules/image/image-psd/src/lib.rs",
+            ],
+            Mode::Edit,
+            &policy,
+        );
+        assert_eq!(
+            commands(&p),
+            vec![
+                "(engine/core) blaze check -p paged-geom -p paged-wire --all-targets",
+                "(modules/image) blaze check -p image-psd",
+            ]
+        );
+        // A workspace manifest or lockfile reaches the whole workspace.
+        policy.rust_edit_backend = RustEditBackend::Cargo;
+        let p = plan_with(t.path(), &["engine/core/Cargo.lock"], Mode::Edit, &policy);
+        assert_eq!(commands(&p), vec!["(engine/core) cargo check --workspace"]);
+        // Advisory edit diagnostics stay available when the scope is unknown.
+        let p = plan_with(
+            t.path(),
+            &[".github/workflows/ci.yml", "modules/image/image-psd/src/lib.rs"],
+            Mode::Edit,
+            &policy,
+        );
+        assert_eq!(p.scope, "unknown");
+        assert_eq!(commands(&p), vec!["(modules/image) cargo check -p image-psd"]);
+    }
+
+    #[test]
+    fn without_moon_each_cargo_workspace_is_a_project() {
+        let t = tempfile::tempdir().unwrap();
+        let r = t.path();
+        write(r, "a/Cargo.toml", "[workspace]\nmembers = [\"x\"]\n");
+        write(r, "a/x/Cargo.toml", "[package]\nname = \"x\"\n");
+        write(r, "b/Cargo.toml", "[package]\nname = \"b\"\n");
+        let p = plan(r, &["a/x/src/lib.rs", "b/src/main.rs"], Mode::Checkpoint, FastBackend::None);
+        assert_eq!(p.projects, vec!["a", "b"]);
+        assert_eq!(
+            commands(&p),
+            vec![
+                "(a) cargo check --workspace --all-targets",
+                "(a) cargo test --workspace",
+                "(b) cargo check --workspace --all-targets",
+                "(b) cargo test --workspace",
+            ]
+        );
+        let p = plan(r, &["a/x/src/lib.rs"], Mode::Edit, FastBackend::Cargo);
+        assert_eq!(commands(&p), vec!["(a) cargo check -p x"]);
     }
 }

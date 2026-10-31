@@ -2,6 +2,8 @@
 use super::output::Format;
 use crate::agent::{self, FastBackend, Mode};
 use crate::cockpit::Cockpit;
+use crate::config::{Config, DevelopmentSection, Downstream};
+use std::path::Path;
 
 pub struct Options<'a> {
     pub files: &'a [String],
@@ -10,19 +12,43 @@ pub struct Options<'a> {
     pub fast_backend: FastBackend,
     pub include_evidence: bool,
     pub select_tests: bool,
+    pub downstream: Option<Downstream>,
+    pub policy: Option<&'a Path>,
+}
+
+/// The `[development]` policy for this run: the project's, or that of `--policy FILE` (a
+/// `cockpit.toml` kept outside the repository, e.g. an umbrella registry's), with an explicit
+/// `--downstream` on top.
+pub fn policy(
+    c: &Cockpit,
+    file: Option<&Path>,
+    downstream: Option<Downstream>,
+) -> anyhow::Result<DevelopmentSection> {
+    let mut policy = match file {
+        Some(path) => Config::load(path)?.development,
+        None => c.located.config.development.clone(),
+    };
+    if let Some(downstream) = downstream {
+        policy.downstream = downstream;
+    }
+    Ok(policy)
 }
 
 pub fn run(c: &Cockpit, options: Options<'_>, fmt: &Format) -> anyhow::Result<i32> {
-    let Options { files, base, mode, fast_backend, include_evidence, select_tests } = options;
-    let (changed, source) = agent::changes(&c.located.root, files, base)?;
-    let mut plan = agent::analyze_with_policy(
-        &c.located.root,
-        &changed,
-        source,
+    let Options {
+        files,
+        base,
         mode,
         fast_backend,
-        &c.located.config.development,
-    )?;
+        include_evidence,
+        select_tests,
+        downstream,
+        policy: policy_file,
+    } = options;
+    let policy = policy(c, policy_file, downstream)?;
+    let (changed, source) = agent::changes(&c.located.root, files, base)?;
+    let mut plan =
+        agent::analyze_with_policy(&c.located.root, &changed, source, mode, fast_backend, &policy)?;
     if include_evidence {
         agent::attach_prior_evidence(&mut plan, &c.state.load(), &changed);
     }
@@ -41,10 +67,31 @@ pub fn run(c: &Cockpit, options: Options<'_>, fmt: &Format) -> anyhow::Result<i3
         if !plan.projects.is_empty() {
             println!("Projects: {}", plan.projects.join(", "));
         }
+        if !plan.downstream_projects.is_empty() {
+            println!("Downstream ({}): {}", plan.downstream, plan.downstream_projects.join(", "));
+        }
+        let classes = &plan.path_classes;
+        if classes.test_data + classes.generated + classes.documentation > 0
+            || !classes.workspace_inputs.is_empty()
+        {
+            println!(
+                "Classified: {} test data, {} generated, {} documentation, {} workspace-wide inputs",
+                classes.test_data,
+                classes.generated,
+                classes.documentation,
+                classes.workspace_inputs.len()
+            );
+        }
         if !plan.unknown_inputs.is_empty() || !plan.unmapped_files.is_empty() {
             println!(
                 "Scope unknown: review unmapped/configuration inputs before selecting checks."
             );
+            for input in plan.unknown_inputs.iter().chain(&plan.unmapped_files).take(8) {
+                println!("  ? {input}");
+            }
+            for note in &plan.notes {
+                println!("  - {note}");
+            }
         }
         if plan.actions.is_empty() {
             println!("No local commands recommended at this stage.");

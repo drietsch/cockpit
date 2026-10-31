@@ -60,24 +60,20 @@ fn output_tail(path: &Path) -> Result<String> {
     Ok(text.chars().rev().take(1500).collect::<String>().chars().rev().collect())
 }
 
-pub fn run(
-    c: &Cockpit,
-    files: &[String],
-    base: Option<&str>,
-    mode: Mode,
-    fast_backend: FastBackend,
-    select_tests: bool,
-    fmt: &Format,
-) -> Result<i32> {
+pub struct Options<'a> {
+    pub files: &'a [String],
+    pub base: Option<&'a str>,
+    pub mode: Mode,
+    pub fast_backend: FastBackend,
+    pub select_tests: bool,
+    pub policy: &'a crate::config::DevelopmentSection,
+}
+
+pub fn run(c: &Cockpit, options: Options<'_>, fmt: &Format) -> Result<i32> {
+    let Options { files, base, mode, fast_backend, select_tests, policy } = options;
     let (changed, source) = agent::changes(&c.located.root, files, base)?;
-    let mut plan = agent::analyze_with_policy(
-        &c.located.root,
-        &changed,
-        source,
-        mode,
-        fast_backend,
-        &c.located.config.development,
-    )?;
+    let mut plan =
+        agent::analyze_with_policy(&c.located.root, &changed, source, mode, fast_backend, policy)?;
     if select_tests {
         if mode != Mode::Edit {
             bail!(

@@ -5,6 +5,7 @@ status: experimental
 importance: high
 paths:
   - src/agent.rs
+  - src/agent_workspace.rs
   - src/cli/plan.rs
   - src/cli/mod.rs
 adrs:
@@ -31,6 +32,14 @@ correctness or changing existing feature-health semantics.
 - Optional Blaze feedback must be labelled advisory, with Cargo/CI retained as
   the authoritative compatibility gate.
 - No plan may introduce healthy evidence into Cockpit's state engine.
+- `--base REF` diffs from `git merge-base REF HEAD`, never from the tip of `REF`.
+- Configured test-data, generated, documentation and test-input path classes map such
+  files to the owning (or named) project's tests; unclassified non-source files stay unknown.
+- A Moon project's languages come from its `moon.yml` tags or language, not from the
+  changed file's extension; a root lockfile plans every project of its language.
+- Optional downstream expansion follows `moon.yml` `dependsOn` backwards (direct or deep),
+  without starting Moon.
+- Edit-time Rust feedback runs in each changed crate's Cargo workspace with `-p <crate>`.
 - Optional `--include-evidence` returns bounded prior feature/test hints from the existing Cockpit scan, clearly marked historical rather than verified against current edits.
 
 ## Deferred work
