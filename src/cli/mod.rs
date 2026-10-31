@@ -154,6 +154,9 @@ pub enum Command {
         /// none | blaze; Blaze is advisory and never a CI substitute
         #[arg(long, value_enum, default_value = "none")]
         fast_backend: crate::agent::FastBackend,
+        /// Add bounded feature/test hints from the last Cockpit scan (historical, not verification)
+        #[arg(long)]
+        include_evidence: bool,
     },
     /// Structured query over project state
     Query {
@@ -280,9 +283,9 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
             };
             init::run(&root, *from_cargo, fmt)
         }
-        Command::Plan { files, base, mode, fast_backend } => {
+        Command::Plan { files, base, mode, fast_backend, include_evidence } => {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
-            plan::run(&c, files, base.as_deref(), *mode, *fast_backend, fmt)
+            plan::run(&c, files, base.as_deref(), *mode, *fast_backend, *include_evidence, fmt)
         }
         Command::Query { expr, format } => {
             let c = open_scanned(cli)?;
