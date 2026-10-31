@@ -21,12 +21,21 @@ pub fn run(c: &Cockpit, transcripts: Option<&Path>, fmt: &Format) -> anyhow::Res
         );
         println!(
             "Tokens: {} input, {} output, {} cache read, {} cache creation",
-            summary.tokens.input, summary.tokens.output,
-            summary.tokens.cache_read, summary.tokens.cache_creation,
+            summary.tokens.input,
+            summary.tokens.output,
+            summary.tokens.cache_read,
+            summary.tokens.cache_creation,
         );
         for model in &summary.models {
-            println!("  {}: {} requests, {} observed tokens", model.model, model.requests,
-                model.tokens.input + model.tokens.output + model.tokens.cache_read + model.tokens.cache_creation);
+            println!(
+                "  {}: {} requests, {} observed tokens",
+                model.model,
+                model.requests,
+                model.tokens.input
+                    + model.tokens.output
+                    + model.tokens.cache_read
+                    + model.tokens.cache_creation
+            );
         }
         println!("Cost not estimated. Session spans are not active work time.");
     }

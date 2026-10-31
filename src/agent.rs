@@ -469,7 +469,11 @@ pub fn analyze_with_policy(
                         cwd: lang.path.clone(),
                         command: test,
                         purpose,
-                        authority: if mode == Mode::Ci { "ci_test" } else { "local_test_not_full_ci" },
+                        authority: if mode == Mode::Ci {
+                            "ci_test"
+                        } else {
+                            "local_test_not_full_ci"
+                        },
                         status: "recommended_not_run",
                     });
                 }

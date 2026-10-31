@@ -30,7 +30,10 @@ impl TokenUsage {
         }
     }
     fn total(self) -> u64 {
-        self.input.saturating_add(self.output).saturating_add(self.cache_read).saturating_add(self.cache_creation)
+        self.input
+            .saturating_add(self.output)
+            .saturating_add(self.cache_read)
+            .saturating_add(self.cache_creation)
     }
     fn add(&mut self, other: Self) {
         self.input = self.input.saturating_add(other.input);
@@ -110,7 +113,8 @@ fn in_project(value: &Value, project: &Path) -> bool {
 }
 
 fn observe(value: &Value, project: &Path, session: &mut Session) {
-    if value.get("type").and_then(Value::as_str) != Some("assistant") || !in_project(value, project) {
+    if value.get("type").and_then(Value::as_str) != Some("assistant") || !in_project(value, project)
+    {
         return;
     }
     let Some(message) = value.get("message") else { return };
@@ -121,7 +125,9 @@ fn observe(value: &Value, project: &Path, session: &mut Session) {
         return;
     }
     let model = message.get("model").and_then(Value::as_str).unwrap_or("unknown").to_owned();
-    if let Some(time) = value.get("timestamp").and_then(Value::as_str)
+    if let Some(time) = value
+        .get("timestamp")
+        .and_then(Value::as_str)
         .and_then(|s| s.parse::<jiff::Timestamp>().ok())
         .map(|t| t.as_second())
     {
@@ -136,7 +142,10 @@ fn observe(value: &Value, project: &Path, session: &mut Session) {
 
 // Bounded line reader: malformed or very large prompt/tool lines are discarded
 // without allocating their entire contents.
-fn read_line_bounded(reader: &mut impl BufRead, buffer: &mut Vec<u8>) -> std::io::Result<(bool, bool)> {
+fn read_line_bounded(
+    reader: &mut impl BufRead,
+    buffer: &mut Vec<u8>,
+) -> std::io::Result<(bool, bool)> {
     buffer.clear();
     let mut too_large = false;
     let mut saw_bytes = false;
@@ -225,8 +234,9 @@ pub fn summarize(project: &Path, transcripts_dir: &Path) -> Result<UsageSummary>
             }
             result.matched_sessions += 1;
             if let (Some(first), Some(last)) = (session.first, session.last) {
-                result.summed_session_span_seconds =
-                    result.summed_session_span_seconds.saturating_add(last.saturating_sub(first) as u64);
+                result.summed_session_span_seconds = result
+                    .summed_session_span_seconds
+                    .saturating_add(last.saturating_sub(first) as u64);
             }
             for request in session.messages.into_values() {
                 result.requests += 1;
@@ -241,9 +251,10 @@ pub fn summarize(project: &Path, transcripts_dir: &Path) -> Result<UsageSummary>
         }
     }
     result.observed_tokens = result.tokens.total();
-    result.models = models.into_iter().map(|(model, (requests, tokens))| ModelUsage {
-        model, requests, tokens,
-    }).collect();
+    result.models = models
+        .into_iter()
+        .map(|(model, (requests, tokens))| ModelUsage { model, requests, tokens })
+        .collect();
     Ok(result)
 }
 
@@ -262,20 +273,23 @@ mod tests {
         let transcripts = t.path().join("transcripts");
         fs::create_dir_all(&transcripts).unwrap();
         let mut file = File::create(transcripts.join("one.jsonl")).unwrap();
-        for (cwd, id, input, output) in [
-            (&project, "m1", 10, 5),
-            (&project, "m1", 15, 7),
-            (&other, "m2", 1000, 1000),
-        ] {
-            writeln!(file, "{}", serde_json::json!({
-                "type": "assistant", "cwd": cwd,
-                "timestamp": "2026-10-31T08:00:00Z",
-                "message": {"id": id, "model": "claude-test", "usage": {
-                    "input_tokens": input, "output_tokens": output,
-                    "cache_read_input_tokens": 3, "cache_creation_input_tokens": 2,
-                }},
-                "content": "ignored private content"
-            })).unwrap();
+        for (cwd, id, input, output) in
+            [(&project, "m1", 10, 5), (&project, "m1", 15, 7), (&other, "m2", 1000, 1000)]
+        {
+            writeln!(
+                file,
+                "{}",
+                serde_json::json!({
+                    "type": "assistant", "cwd": cwd,
+                    "timestamp": "2026-10-31T08:00:00Z",
+                    "message": {"id": id, "model": "claude-test", "usage": {
+                        "input_tokens": input, "output_tokens": output,
+                        "cache_read_input_tokens": 3, "cache_creation_input_tokens": 2,
+                    }},
+                    "content": "ignored private content"
+                })
+            )
+            .unwrap();
         }
         writeln!(file, "{}", serde_json::json!({"type": "user", "content": "secret"})).unwrap();
         let report = summarize(&project, &transcripts).unwrap();
