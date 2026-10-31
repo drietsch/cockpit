@@ -1,0 +1,56 @@
+name: release v0.3.0 after successful main CI
+
+on:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: cockpit-release-v0.3.0
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # This workflow is intentionally single-version, not auto-release on every push.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - name: Tag verified v0.3.0 commit and dispatch binary build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Never tag a stale green commit or a non-release version.
+          current_main="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [[ "$current_main" != "$VERIFIED_SHA" ]]; then
+            echo "A newer main commit exists; not tagging a stale CI result."
+            exit 0
+          fi
+          version="$(awk -F'"' '/^version = "/ { print $2; exit }' Cargo.toml)"
+          if [[ "$version" != "0.3.0" ]]; then
+            echo "Not the v0.3.0 release version."
+            exit 0
+          fi
+          if gh release view v0.3.0 --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo "v0.3.0 already published."
+            exit 0
+          fi
+          if ! git ls-remote --exit-code origin refs/tags/v0.3.0 >/dev/null 2>&1; then
+            git tag v0.3.0 "$VERIFIED_SHA"
+            git push origin refs/tags/v0.3.0
+          fi
+          # A GITHUB_TOKEN tag push intentionally does not trigger push workflows;
+          # workflow_dispatch is the supported explicit continuation.
+          gh api -X POST "/repos/$GH_REPO/actions/workflows/release.yml/dispatches" -f ref=v0.3.0
