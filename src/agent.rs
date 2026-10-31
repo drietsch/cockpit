@@ -357,6 +357,48 @@ mod tests {
     }
 
     #[test]
+    fn git_changes_include_modified_and_untracked_files() {
+        let t = tempfile::tempdir().unwrap();
+        let run = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(t.path())
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        run(&["init", "-q"]);
+        fs::write(t.path().join("tracked.rs"), "fn old() {}\n").unwrap();
+        run(&["add", "tracked.rs"]);
+        run(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.org",
+            "commit",
+            "-q",
+            "-m",
+            "initial",
+        ]);
+        fs::write(t.path().join("tracked.rs"), "fn new() {}\n").unwrap();
+        fs::write(t.path().join("untracked.ts"), "export const n = 1;\n").unwrap();
+        let (files, source) = changes(t.path(), &[], None).unwrap();
+        assert_eq!(files, vec!["tracked.rs", "untracked.ts"]);
+        assert_eq!(source, "git:HEAD+worktree");
+    }
+
+    #[test]
+    fn single_cargo_project_has_root_fallback() {
+        let t = tempfile::tempdir().unwrap();
+        fs::write(t.path().join("Cargo.toml"), "[package]\nname = \"example\"\n").unwrap();
+        let p = plan(t.path(), &["src/lib.rs"], Mode::Checkpoint, FastBackend::None);
+        assert_eq!(p.projects, vec!["root"]);
+        assert_eq!(p.actions[0].command, vec!["cargo", "check", "--workspace", "--all-targets"]);
+        assert_eq!(p.actions[1].command, vec!["cargo", "test", "--workspace"]);
+    }
+
+    #[test]
     fn unsafe_paths_rejected() {
         assert!(normalize("../secret").is_err());
         assert!(normalize("/tmp/secret").is_err());
