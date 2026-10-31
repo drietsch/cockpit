@@ -207,6 +207,66 @@ mod tests {
     }
 
     #[test]
+    fn linked_playwright_cases_collapse_to_one_file_action() {
+        use crate::ids::{FeatureId, SuiteId, TestId};
+        use crate::model::{Confidence, FeatureHealth, HealthState, Importance, Lifecycle, Test};
+        use crate::state::{FeatureView, TestView};
+
+        let t = tempfile::tempdir().unwrap();
+        let src = t.path().join("apps/editor/src/login.tsx");
+        let spec = t.path().join("apps/editor/tests/login.spec.ts");
+        fs::create_dir_all(src.parent().unwrap()).unwrap();
+        fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        fs::write(&src, "export const login = true;").unwrap();
+        fs::write(&spec, "test('login', () => {});").unwrap();
+        fs::write(t.path().join("apps/editor/playwright.config.ts"), "export default {};").unwrap();
+
+        let mut state = empty_state(t.path());
+        let now = crate::time::now();
+        state.last_scan_at = Some(now);
+        let feature_id = FeatureId::new("FEAT-login");
+        let linked = vec![TestId::new("pw-1"), TestId::new("pw-2")];
+        let feature = Feature {
+            id: feature_id.clone(), title: "Login".into(), description: None,
+            lifecycle: Lifecycle::Stable, importance: Importance::High,
+            owners: vec![], tags: vec![], paths: vec!["apps/editor/src/**".into()],
+            adr_ids: vec![], dependencies: vec![], aliases: vec![], claims: vec![],
+            acceptance_criteria: vec![], sections: vec![], body_md: String::new(),
+            since: None, superseded_by: None, references: vec![], group: vec![],
+            source: RelPath::new("docs/features/login.md"), extra: Default::default(),
+        };
+        state.features.insert(feature_id, FeatureView {
+            feature, health: FeatureHealth {
+                state: HealthState::Unknown, confidence: Confidence::Low,
+                headline: "Unknown".into(), reasons: vec![], rollups: vec![], chain: vec![],
+                impl_commit: None, impl_committed_at: None, evaluated_at: now, rank_score: 0,
+            },
+            impl_commit: None, impl_committed_at: None, commits: vec![], adrs: vec![],
+            tests: linked.clone(), benchmarks: vec![], visuals: vec![],
+        });
+        for id in linked {
+            let test = Test {
+                id: id.clone(), suite: SuiteId::new("pw"), key: format!("login:{}", id.as_str()),
+                name: "login".into(), classname: None, kind: TestKind::E2e,
+                source_path: Some(RelPath::new("apps/editor/tests/login.spec.ts")),
+                source_path_origin: None, line: None, tags: vec![], component: None,
+                declared_feature_ids: vec![], level: None, first_seen: now, last_seen: now,
+            };
+            state.tests.insert(id, TestView {
+                test, features: vec![], latest: None, history: vec![], flaky: false,
+                flaky_text: None, duration_trend: None,
+            });
+        }
+        let result = select(t.path(), &state, &["apps/editor/src/login.tsx".into()]);
+        assert_eq!(result.selection.matched_features, vec!["FEAT-login"]);
+        assert_eq!(result.selection.total_candidates, 2);
+        assert_eq!(result.actions.len(), 1);
+        assert_eq!(result.actions[0].cwd, "apps/editor");
+        assert_eq!(result.actions[0].command, vec!["bunx", "playwright", "test", "tests/login.spec.ts"]);
+        assert_eq!(result.selection.status, "advisory_runnable_selection");
+    }
+
+    #[test]
     fn no_scan_never_invents_test_coverage() {
         let t = tempfile::tempdir().unwrap();
         let state = empty_state(t.path());
