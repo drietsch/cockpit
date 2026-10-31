@@ -559,10 +559,12 @@ mod tests {
         let t = sample();
         let mut p = plan(t.path(), &["engine/core/src/lib.rs"], Mode::Edit, FastBackend::None);
         let state = ProjectState::empty(crate::model::Project {
-            id: crate::ids::ProjectId::new("sample"),
+            id: "sample".into(),
             name: "Sample".into(),
-            root: RelPath::root(),
+            root: t.path().to_path_buf(),
             repos: vec![],
+            components: vec![],
+            primary_branch: "main".into(),
         });
         attach_prior_evidence(&mut p, &state, &["engine/core/src/lib.rs".into()]);
         assert_eq!(p.verification_status, "not_run");
