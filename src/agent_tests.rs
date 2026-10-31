@@ -9,7 +9,7 @@ use crate::paths::RelPath;
 use crate::state::ProjectState;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const MAX_CANDIDATES: usize = 32;
 const MAX_ACTIONS: usize = 12;
