@@ -66,3 +66,30 @@ The command fails rather than claiming success on an empty or uncertain plan.
 - Historical Claude usage data remains local; it is never uploaded automatically.
 - Research-backed improvement requires measuring full SDLC task latency, tokens
   and correctness against the existing workflow.
+
+## Playwright and change-scoped test feedback
+
+```sh
+# Import any existing JUnit/nextest/Playwright results once:
+cockpit scan
+
+# Discover historical test candidates and exact Playwright spec-file commands:
+cockpit --json plan --mode edit --select-tests --include-evidence
+
+# Explicitly run the selected Playwright specs (never automatically):
+cockpit --json verify --mode edit --select-tests
+```
+
+Selection joins changed file paths to feature ownership, then to individual
+tests linked by the previous Cockpit scan. A modified known spec is also
+eligible directly. Playwright is launched only for existing `*.spec.*` files
+under a discoverable `playwright.config.*`; test cases within one file collapse
+to a single `bunx playwright test <file>` invocation. Incomplete or missing
+mappings do **not** prove that other tests are unaffected. This is fast,
+advisory edit-time feedback, not authoritative CI.
+
+For a pull request, use a fixed base SHA from `github.event.pull_request.base.sha`
+with `--base` when you want to plan changes relative to the PR target
+(ensure `fetch-depth: 0`). Use `--mode ci` for project-level validation;
+do not substitute the selected Playwright subset for all browser tests,
+fidelity checks or the existing required CI workflows.
