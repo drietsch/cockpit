@@ -690,7 +690,8 @@ mod tests {
     fn ci_mode_never_claims_to_run_ci() {
         let t = sample();
         let p = plan(t.path(), &["engine/core/src/lib.rs"], Mode::Ci, FastBackend::None);
-        assert!(p.actions.is_empty());
+        assert!(!p.actions.is_empty());
+        assert!(p.actions.iter().all(|action| action.stage == "ci"));
         assert_eq!(p.verification_status, "not_run");
         assert!(p.authoritative_ci_required);
     }
