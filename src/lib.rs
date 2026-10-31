@@ -6,6 +6,8 @@
 //! health / attention / freshness, `store` persists the derived index (a deletable cache with
 //! a history of runs), and `server` renders it. `cli` is the human and agent entry point.
 
+pub mod agent;
+pub mod agent_tests;
 pub mod cli;
 pub mod cockpit;
 pub mod config;
@@ -24,6 +26,7 @@ pub mod server;
 pub mod state;
 pub mod store;
 pub mod time;
+pub mod usage;
 pub mod validate;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

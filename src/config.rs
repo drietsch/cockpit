@@ -11,6 +11,32 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+/// Shared local/GitHub CI verification policy, independent of feature health.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RustEditBackend {
+    #[default]
+    None,
+    Cargo,
+    Blaze,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RustCiBackend {
+    #[default]
+    Cargo,
+    /// Blaze may run first for rapid diagnostics, but pinned Cargo is still required.
+    BlazeThenCargo,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DevelopmentSection {
+    pub rust_edit_backend: RustEditBackend,
+    pub rust_ci_backend: RustCiBackend,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error(
@@ -68,6 +94,7 @@ pub struct Config {
     pub pull: PullSection,
     pub commits: CommitsSection,
     pub markdown: MarkdownSection,
+    pub development: DevelopmentSection,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

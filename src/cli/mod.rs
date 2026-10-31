@@ -7,11 +7,14 @@ pub mod export;
 pub mod feature;
 pub mod init;
 pub mod output;
+pub mod plan;
 pub mod pull;
 pub mod query;
 pub mod scan;
 pub mod serve;
 pub mod status;
+pub mod usage;
+pub mod verify;
 
 use crate::cockpit::{Cockpit, CockpitError};
 use crate::config::ConfigError;
@@ -139,6 +142,51 @@ pub enum Command {
         #[arg(long)]
         strict: bool,
     },
+    /// Suggest minimal, staged verification for changed files; execute nothing
+    Plan {
+        /// Explicit project-root-relative changed file (repeatable); defaults to Git changes
+        #[arg(long = "file")]
+        files: Vec<String>,
+        /// Compare the worktree against this git revision (default: HEAD)
+        #[arg(long)]
+        base: Option<String>,
+        /// edit | checkpoint | ci
+        #[arg(long, value_enum, default_value = "edit")]
+        mode: crate::agent::Mode,
+        /// none | blaze; Blaze is advisory and never a CI substitute
+        #[arg(long, value_enum, default_value = "auto")]
+        fast_backend: crate::agent::FastBackend,
+        /// Add bounded feature/test hints from the last Cockpit scan (historical, not verification)
+        #[arg(long)]
+        include_evidence: bool,
+        /// Suggest exact linked Playwright spec files for fast edit-time testing
+        #[arg(long)]
+        select_tests: bool,
+    },
+    /// Aggregate local Claude Code CLI token usage for this repository; metadata only
+    Usage {
+        /// Claude transcript root (default ~/.claude/projects)
+        #[arg(long)]
+        transcripts_dir: Option<PathBuf>,
+    },
+    /// Execute selected verification commands (explicit; logs stay local)
+    Verify {
+        /// Explicit project-root-relative changed file (repeatable)
+        #[arg(long = "file")]
+        files: Vec<String>,
+        /// Compare the worktree against this revision
+        #[arg(long)]
+        base: Option<String>,
+        /// checkpoint or ci
+        #[arg(long, value_enum, default_value = "checkpoint")]
+        mode: crate::agent::Mode,
+        /// Override the shared Rust edit backend
+        #[arg(long, value_enum, default_value = "auto")]
+        fast_backend: crate::agent::FastBackend,
+        /// In edit mode run selected linked Playwright spec files (not a CI replacement)
+        #[arg(long)]
+        select_tests: bool,
+    },
     /// Structured query over project state
     Query {
         expr: String,
@@ -263,6 +311,29 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
                 None => cwd.clone(),
             };
             init::run(&root, *from_cargo, fmt)
+        }
+        Command::Plan { files, base, mode, fast_backend, include_evidence, select_tests } => {
+            let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
+            plan::run(
+                &c,
+                plan::Options {
+                    files,
+                    base: base.as_deref(),
+                    mode: *mode,
+                    fast_backend: *fast_backend,
+                    include_evidence: *include_evidence,
+                    select_tests: *select_tests,
+                },
+                fmt,
+            )
+        }
+        Command::Verify { files, base, mode, fast_backend, select_tests } => {
+            let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
+            verify::run(&c, files, base.as_deref(), *mode, *fast_backend, *select_tests, fmt)
+        }
+        Command::Usage { transcripts_dir } => {
+            let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
+            usage::run(&c, transcripts_dir.as_deref(), fmt)
         }
         Command::Query { expr, format } => {
             let c = open_scanned(cli)?;

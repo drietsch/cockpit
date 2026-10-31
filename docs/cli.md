@@ -18,6 +18,9 @@ usage/config · 3 no project · 4 index error. `--json` prints exactly one docum
 | `init [--from-cargo]` | scaffold cockpit.toml, docs/features, docs/adr (never overwrites); `--from-cargo` proposes one feature per crate layer |
 | `migrate paged-state <dir> [--out] [--config-out] [--dry-run] [--force]` | 1:1 conversion of a paged-media/state registry |
 | `pull [--dry-run] [--force] [--source glob]… [--strict]` | fetch the newest CI artifact per `[evidence.github]` source, then rescan |
+| `plan [--file PATH]… [--base REF] [--mode edit|checkpoint|ci] [--fast-backend auto|none|cargo|blaze] [--include-evidence] [--select-tests]` | Read-only changed-file impact and staged verification suggestions (`cockpit.plan.v1` with `--json`); never runs builds or tests |
+| `verify [--file PATH]… [--base REF] [--mode checkpoint|ci]` | Explicitly execute policy-selected commands, with bounded output and local logs (`cockpit.verify.v1`) |
+| `usage [--transcripts-dir PATH]` | Opt-in, metadata-only Claude Code token/session aggregate (`cockpit.usage.v1` with `--json`) |
 | `query '<expr>' [--format table\|ids\|count\|json]` | the query language (below) |
 | `completions <shell>` | bash, zsh, fish, powershell, elvish |
 
@@ -44,3 +47,76 @@ cockpit query 'changed_since >= 7d and not state = healthy'
 ```
 
 The same grammar backs `GET /api/v1/query?q=…` and `GET /api/v1/features?query=<expr>`.
+
+## Adaptive verification planning (experimental)
+
+```sh
+cockpit --json plan --file src/agent.rs --mode checkpoint
+cockpit --json plan --mode edit --fast-backend blaze
+cockpit plan --base origin/main --mode checkpoint
+```
+
+Without `--file`, `plan` inspects changes against `HEAD` (or `--base`) and includes untracked non-ignored files. Paths are relative to the selected project root. `--file` and `--base` cannot be combined. The command reads a Moon project map if present and otherwise uses the root Cargo or Bun project. It does not scan the Cockpit evidence index, run a build, run tests, or invoke Blaze. `--fast-backend blaze` only proposes advisory rapid Rust feedback; it does not replace the project's pinned Cargo toolchain. Checkpoint mode proposes checks and tests for owning projects. Unknown/configuration inputs prevent claiming scoped checks are sufficient. `--mode ci` performs no local work and defers to existing CI. Path ownership is not semantic dependency analysis; all recommendations are **unverified** until executed and the authoritative CI gates are evaluated.
+
+Add `--include-evidence` to join changed paths to feature `paths:` globs and linked tests from the **last existing Cockpit scan** without rescanning or executing anything. Results are capped (10 features, 12 tests) and explicitly marked historical; prior health and test statuses do not verify changed code. No scan returns `unavailable_not_scanned`, not a green result.
+
+## Shared development and CI policy
+
+The optional `[development]` section of `cockpit.toml` governs both local planning and CI suggestions:
+
+```toml
+[development]
+rust_edit_backend = "blaze"     # none | cargo | blaze (default: none)
+rust_ci_backend = "blaze_then_cargo" # cargo | blaze_then_cargo (default: cargo)
+```
+
+`cockpit plan --mode edit` uses the configured Rust feedback backend, overridable with `--fast-backend none|cargo|blaze`. `cockpit plan --mode ci` always proposes the pinned-Cargo checks and tests for known Rust projects. When configured, Blaze is a *preflight in addition to Cargo*, never an alternative authoritative result. TypeScript uses Moon's `js-check`/`js-test` or Bun scripts. The same checked-in policy can be read in a GitHub Actions job; **existing CI workflows must explicitly run the planned commands**. No workflow is changed or invoked by the planning command itself. An empty working-tree change list in CI means consider all detectable projects; it is not treated as proof that nothing changed.
+
+## Claude Code usage metrics
+
+```sh
+cockpit --json usage
+cockpit -C /path/to/repo --json usage --transcripts-dir /path/to/claude/projects
+```
+
+This command scans local `~/.claude/projects` transcript JSONL on demand, counting only assistant records whose cwd is within the chosen repo. It aggregates model, input/output/cache tokens and observed session spans; it does **not** export prompts, tools, full transcript contents, raw message IDs or file paths. Duplicate streaming messages are deduplicated per transcript. It never estimates dollar costs from unverifiable prices, and observed session span is not active coding time. Local transcript formats can change; missing/unrecognized records are not fabricated. It does not change feature health, and is not uploaded to GitHub automatically.
+
+## Executing the policy (opt-in)
+
+`cockpit plan` never starts processes. `cockpit verify` explicitly executes its
+checkpoint/CI recommendations, captures complete local logs in `.cockpit/verification`,
+and prints only short results or failure tails. It stops on the first non-advisory
+failure (exit 1); an optional Blaze preflight is advisory. Unknown change impact,
+missing executable, path escape, or an empty plan fail closed rather than
+reporting success. Only the selected project checks are marked passed. Existing
+repository-specific GitHub gates, WASM, browser and cross-workspace checks are
+**not** replaced by this command.
+
+```sh
+cockpit verify --mode checkpoint --file src/lib.rs
+cockpit --json verify --mode ci
+```
+
+For GitHub Actions, the same `cockpit.toml` policy is read from the checkout:
+install the pinned Cockpit binary, install the repository's required Rust/Blaze,
+Moon and Bun toolchains, and run `cockpit --json verify --mode ci` in a job.
+This invokes the discovered projects' checks and tests even in a clean CI
+checkout. Keep existing specialized CI jobs; **do not duplicate checks** when
+adopting this as their replacement. The CI checkout must provide a complete
+project mapping, otherwise verification fails rather than claiming coverage.
+
+The CLI command does not create or edit GitHub workflows. See
+`docs/agentic-sdlc.md` for adoption and limitations.
+
+## Impact-driven test selection (experimental)
+
+```sh
+cockpit --json plan --file apps/editor/src/login.tsx --mode edit --select-tests
+cockpit --json verify --file apps/editor/src/login.tsx --mode edit --select-tests
+```
+
+Test selection uses existing Cockpit feature `paths:` ownership and test links from the **last scan**. Changes directly to a recorded spec file also make it a candidate. No scanned test inventory means `unavailable_not_scanned`, not an empty proof. The machine-readable plan reports candidates, prior status, reasons, truncation, and exact runnable actions independently.
+
+Only existing `*.spec.ts(x)`/`*.spec.js(x)`/ `*.spec.mts` Playwright files with a discoverable `playwright.config.*` ancestor become executable edit-time actions. Multiple test cases in one spec are grouped to one `bunx playwright test <file>` invocation. This is **advisory targeted feedback**; it never proves other tests unaffected. `cockpit verify --mode edit --select-tests` is explicit execution and fails when no exact runnable tests are available; checkpoint and CI still run broader project checks/tests. Neither Playwright nor feature coverage is inferred from prior passing status. Unknown impacted code still requires normal verification.
+
+The verifier writes full logs to `.cockpit/verification/` and returns bounded error summaries, not huge model-context output. No test is run by `plan`.
