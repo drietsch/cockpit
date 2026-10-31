@@ -58,3 +58,38 @@ An opt-in path-to-feature-to-test projection may suggest exact Playwright spec f
 It only uses tests previously imported by Cockpit and requires a local Playwright config
 before emitting a runnable action. This is fast-feedback, not a proof of impact completeness.
 Explicit execution stores logs locally and leaves existing CI authoritative.
+
+## Monorepo amendment (2026-10-31)
+
+Trying the planner on a monorepo with one Moon workspace, ten Cargo workspaces and one Bun
+workspace showed four gaps; the decisions that close them:
+
+- **`--base` means the merge base.** Diffing against the base's tip reported everything the
+  base gained after the branch forked as the branch's change. A plan answers "what does this
+  change need", so `--base REF` compares with `git merge-base REF HEAD` (pull-request
+  semantics). An ancestor of `HEAD` is its own merge base, so a fixed ancestor SHA behaves as
+  before; no flag keeps the tip comparison.
+- **Path classes instead of a blanket unknown.** Fixtures, golden files, translations and
+  checked-in generated files are not source, yet they belong to a project. `[development]`
+  names them (`test_data`, with conventional defaults; `generated`; `documentation`;
+  `test_inputs` for inputs read across projects); a match plans the owning or named
+  project's tests (checks and tests for generated files). Fail-closed stays the rule for
+  everything unclassified, and for root configuration (`.github/`, `.moon/`, `tooling/`).
+  A root lockfile or manifest plans every project of its language: that is complete for the
+  known project set, so the scope is `workspace_wide_path_based`, not `unknown`.
+- **Moon decides a project's tasks.** Languages come from `moon.yml` tags or language, so a
+  plan never names a task the project lacks; a source file in a project without tasks for its
+  language is unmapped.
+- **Downstream from declared edges, without Moon.** `downstream = "direct" | "deep"` follows
+  `dependsOn` backwards from projects with changed source or generated files. Running
+  `moon query --affected --downstream` was rejected: it writes Moon's cache into the worktree
+  (planning is read-only) and has hung for many minutes; the `dependsOn` lists are what Moon
+  builds its graph from. The expansion is still declared, not compiler-resolved.
+- **Edit feedback per Cargo workspace.** Blaze and Cargo run in the workspace that builds the
+  changed crate, with `-p` per changed package. Because they are advisory and claim nothing,
+  they are offered under an unknown scope too; checkpoint and CI suggestions are not.
+
+`cockpit plan --policy FILE` reads `[development]` from another file for a repository
+planned without its own `cockpit.toml`. Plan fields are added, none removed
+(`downstream`, `downstream_projects`, `path_classes`, `notes`; ADR-0009).
+

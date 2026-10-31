@@ -133,7 +133,22 @@ commands during `cockpit scan`.
 [development]
 rust_edit_backend = "none"          # none | cargo | blaze (default: none)
 rust_ci_backend = "cargo"           # cargo | blaze_then_cargo (default: cargo)
+downstream = "none"                 # none | direct | deep: add Moon dependents (default: none)
+# Repository-relative globs. A match inside a project plans that project's tests (test_data)
+# or its checks and tests (generated); outside every project the file stays unknown.
+test_data = ["**/fixtures/**", "**/__fixtures__/**", "**/testdata/**",
+             "**/__snapshots__/**", "**/proptest-regressions/**"]   # the default
+generated = []                      # e.g. ["apps/editor/apps/canvas/feature-ids.json"]
+documentation = []                  # non-Markdown docs: no checks, like *.md
+# Inputs other projects' tests read, as glob = [Moon project ids]: plans those projects' tests.
+test_inputs = { "docs/development/surface-parity-matrix.json" = ["editor"] }
 ```
+
+Setting `test_data` replaces the default list. A file that is neither source (by name:
+`*.rs`, `*.ts`…, `Cargo.toml`, `Cargo.lock`, `package.json`, `tsconfig*.json`) nor
+documentation nor matched by one of these classes keeps the plan's scope `unknown`.
+A repository without its own `cockpit.toml` (a worktree planned from an umbrella
+registry, say) can take this section from another file: `cockpit plan --policy FILE`.
 
 An opt-in Blaze edit backend provides fast, advisory feedback. In CI,
 `blaze_then_cargo` adds an advisory preflight, followed by the repository's

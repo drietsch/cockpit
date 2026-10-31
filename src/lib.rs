@@ -8,6 +8,7 @@
 
 pub mod agent;
 pub mod agent_tests;
+pub mod agent_workspace;
 pub mod cli;
 pub mod cockpit;
 pub mod config;
