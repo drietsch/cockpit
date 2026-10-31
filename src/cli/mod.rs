@@ -9,6 +9,7 @@ pub mod init;
 pub mod output;
 pub mod pull;
 pub mod query;
+pub mod plan;
 pub mod scan;
 pub mod serve;
 pub mod status;
@@ -139,6 +140,21 @@ pub enum Command {
         #[arg(long)]
         strict: bool,
     },
+    /// Suggest minimal, staged verification for changed files; execute nothing
+    Plan {
+        /// Explicit project-root-relative changed file (repeatable); defaults to Git changes
+        #[arg(long = "file")]
+        files: Vec<String>,
+        /// Compare the worktree against this git revision (default: HEAD)
+        #[arg(long)]
+        base: Option<String>,
+        /// edit | checkpoint | ci
+        #[arg(long, value_enum, default_value = "edit")]
+        mode: crate::agent::Mode,
+        /// none | blaze; Blaze is advisory and never a CI substitute
+        #[arg(long, value_enum, default_value = "none")]
+        fast_backend: crate::agent::FastBackend,
+    },
     /// Structured query over project state
     Query {
         expr: String,
@@ -263,6 +279,10 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
                 None => cwd.clone(),
             };
             init::run(&root, *from_cargo, fmt)
+        }
+        Command::Plan { files, base, mode, fast_backend } => {
+            let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
+            plan::run(&c, files, base.as_deref(), *mode, *fast_backend, fmt)
         }
         Command::Query { expr, format } => {
             let c = open_scanned(cli)?;
