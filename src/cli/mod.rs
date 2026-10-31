@@ -316,12 +316,14 @@ fn dispatch(cli: &Cli, fmt: &output::Format) -> anyhow::Result<i32> {
             let c = Cockpit::open(&cwd, cli.project.as_deref(), cli.index.as_deref())?;
             plan::run(
                 &c,
-                files,
-                base.as_deref(),
-                *mode,
-                *fast_backend,
-                *include_evidence,
-                *select_tests,
+                plan::Options {
+                    files,
+                    base: base.as_deref(),
+                    mode: *mode,
+                    fast_backend: *fast_backend,
+                    include_evidence: *include_evidence,
+                    select_tests: *select_tests,
+                },
                 fmt,
             )
         }
