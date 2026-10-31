@@ -31,6 +31,7 @@ correctness or changing existing feature-health semantics.
 - Optional Blaze feedback must be labelled advisory, with Cargo/CI retained as
   the authoritative compatibility gate.
 - No plan may introduce healthy evidence into Cockpit's state engine.
+- Optional `--include-evidence` returns bounded prior feature/test hints from the existing Cockpit scan, clearly marked historical rather than verified against current edits.
 
 ## Deferred work
 
