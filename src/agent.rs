@@ -64,7 +64,11 @@ struct Languages {
 /// Explicit files are useful to agents that have an uncommitted edit transaction.
 /// With no explicit files, compare the worktree (including staged changes) to
 /// HEAD or the requested base and include untracked, non-ignored files.
-pub fn changes(root: &Path, explicit: &[String], base: Option<&str>) -> Result<(Vec<String>, String)> {
+pub fn changes(
+    root: &Path,
+    explicit: &[String],
+    base: Option<&str>,
+) -> Result<(Vec<String>, String)> {
     if !explicit.is_empty() {
         if base.is_some() {
             bail!("--base cannot be combined with --file");
@@ -125,10 +129,10 @@ fn read_moon(root: &Path) -> Result<Option<BTreeMap<String, String>>> {
     if !path.is_file() {
         return Ok(None);
     }
-    let text = std::fs::read_to_string(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
-    let workspace: MoonWorkspace = serde_yaml_ng::from_str(&text)
-        .with_context(|| format!("parsing {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let workspace: MoonWorkspace =
+        serde_yaml_ng::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
     Ok(Some(workspace.projects))
 }
 
@@ -146,9 +150,15 @@ fn owner<'a>(name: &str, projects: &'a BTreeMap<String, String>) -> Option<(&'a 
 fn global_input(p: &str) -> bool {
     matches!(
         p,
-        "Cargo.toml" | "Cargo.lock" | "package.json" | "bun.lock"
-            | "bunfig.toml" | "tsconfig.base.json" | "rust-toolchain.toml"
-            | "cockpit.toml" | ".mcp.json"
+        "Cargo.toml"
+            | "Cargo.lock"
+            | "package.json"
+            | "bun.lock"
+            | "bunfig.toml"
+            | "tsconfig.base.json"
+            | "rust-toolchain.toml"
+            | "cockpit.toml"
+            | ".mcp.json"
     ) || p.starts_with(".cargo/")
         || p.starts_with(".moon/")
         || p.starts_with(".github/")
@@ -156,13 +166,23 @@ fn global_input(p: &str) -> bool {
 }
 
 fn is_test(p: &str) -> bool {
-    p.contains("/tests/") || p.starts_with("tests/") || p.contains("/test/")
-        || p.ends_with("_test.rs") || p.contains(".test.") || p.contains(".spec.")
+    p.contains("/tests/")
+        || p.starts_with("tests/")
+        || p.contains("/test/")
+        || p.ends_with("_test.rs")
+        || p.contains(".test.")
+        || p.contains(".spec.")
 }
 
 /// This planner is intentionally path-based. The impact of a changed public
 /// symbol, generated code or build script is not proven by a project prefix.
-pub fn analyze(root: &Path, files: &[String], source: String, mode: Mode, fast: FastBackend) -> Result<Plan> {
+pub fn analyze(
+    root: &Path,
+    files: &[String],
+    source: String,
+    mode: Mode,
+    fast: FastBackend,
+) -> Result<Plan> {
     let moon = read_moon(root)?;
     let mut projects = BTreeMap::<String, Languages>::new();
     let mut unmapped = Vec::new();
@@ -239,7 +259,12 @@ pub fn analyze(root: &Path, files: &[String], source: String, mode: Mode, fast: 
                     let check = if moon.is_some() {
                         vec!["moon".into(), "run".into(), format!("{id}:{kind}-check")]
                     } else if kind == "rust" {
-                        vec!["cargo".into(), "check".into(), "--workspace".into(), "--all-targets".into()]
+                        vec![
+                            "cargo".into(),
+                            "check".into(),
+                            "--workspace".into(),
+                            "--all-targets".into(),
+                        ]
                     } else {
                         vec!["bun".into(), "run".into(), "typecheck".into()]
                     };
@@ -283,7 +308,11 @@ pub fn analyze(root: &Path, files: &[String], source: String, mode: Mode, fast: 
     let changed_files = all.iter().take(32).cloned().collect::<Vec<_>>();
     let omitted_changed_files = changed_count.saturating_sub(changed_files.len());
     Ok(Plan {
-        mode: match mode { Mode::Edit => "edit", Mode::Checkpoint => "checkpoint", Mode::Ci => "ci" },
+        mode: match mode {
+            Mode::Edit => "edit",
+            Mode::Checkpoint => "checkpoint",
+            Mode::Ci => "ci",
+        },
         source,
         changed_count,
         changed_files,
@@ -317,7 +346,14 @@ mod tests {
     }
 
     fn plan(root: &Path, paths: &[&str], mode: Mode, fast: FastBackend) -> Plan {
-        analyze(root, &paths.iter().map(|x| x.to_string()).collect::<Vec<_>>(), "test".into(), mode, fast).unwrap()
+        analyze(
+            root,
+            &paths.iter().map(|x| x.to_string()).collect::<Vec<_>>(),
+            "test".into(),
+            mode,
+            fast,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -339,7 +375,12 @@ mod tests {
     #[test]
     fn nested_project_ownership_wins() {
         let t = sample();
-        let p = plan(t.path(), &["modules/sheet/viewer/src/lib.ts"], Mode::Checkpoint, FastBackend::None);
+        let p = plan(
+            t.path(),
+            &["modules/sheet/viewer/src/lib.ts"],
+            Mode::Checkpoint,
+            FastBackend::None,
+        );
         assert_eq!(p.projects, vec!["sheet-viewer"]);
         assert_eq!(p.actions.len(), 2);
         assert_eq!(p.actions[0].command[2], "sheet-viewer:js-check");
@@ -348,7 +389,12 @@ mod tests {
     #[test]
     fn root_config_forces_unknown_scope() {
         let t = sample();
-        let p = plan(t.path(), &["bun.lock", "modules/sheet/src/lib.rs"], Mode::Checkpoint, FastBackend::None);
+        let p = plan(
+            t.path(),
+            &["bun.lock", "modules/sheet/src/lib.rs"],
+            Mode::Checkpoint,
+            FastBackend::None,
+        );
         assert_eq!(p.scope, "unknown");
         assert!(p.actions.is_empty());
         assert_eq!(p.projects, vec!["sheet"]);
