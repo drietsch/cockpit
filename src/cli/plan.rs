@@ -71,13 +71,14 @@ pub fn run(c: &Cockpit, options: Options<'_>, fmt: &Format) -> anyhow::Result<i3
             println!("Downstream ({}): {}", plan.downstream, plan.downstream_projects.join(", "));
         }
         let classes = &plan.path_classes;
-        if classes.test_data + classes.generated + classes.documentation > 0
+        if classes.test_data + classes.generated + classes.source_config + classes.documentation > 0
             || !classes.workspace_inputs.is_empty()
         {
             println!(
-                "Classified: {} test data, {} generated, {} documentation, {} workspace-wide inputs",
+                "Classified: {} test data, {} generated, {} source config, {} documentation, {} workspace-wide inputs",
                 classes.test_data,
                 classes.generated,
+                classes.source_config,
                 classes.documentation,
                 classes.workspace_inputs.len()
             );
