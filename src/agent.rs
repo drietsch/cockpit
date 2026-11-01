@@ -359,6 +359,7 @@ impl Need {
 enum Reason {
     Owner,
     Generated,
+    SourceConfig,
     WorkspaceInput,
     Downstream,
     TestData,
@@ -371,6 +372,9 @@ impl Reason {
             Reason::Owner if tests_changed => "Checkpoint changed tests and their owning project",
             Reason::Owner => "Checkpoint owning project; dependency impact is not proven",
             Reason::Generated => "Changed generated file: owning project's checks and tests",
+            Reason::SourceConfig => {
+                "Changed project configuration: owning project's checks and tests"
+            }
             Reason::WorkspaceInput => {
                 "Changed root lockfile or manifest: every project of that language"
             }
@@ -439,6 +443,8 @@ fn fallback_owner(root: &Path, p: &str) -> Option<(String, String, bool, bool)> 
 pub struct PathClasses {
     pub test_data: usize,
     pub generated: usize,
+    /// Project configuration (`source_config`) that planned its owning project like source.
+    pub source_config: usize,
     pub documentation: usize,
     /// Root lockfiles/manifests that widened the plan to every project of a language.
     pub workspace_inputs: Vec<String>,
@@ -468,6 +474,7 @@ pub fn analyze_with_policy(
     let moon = read_moon(root)?;
     let test_data = globs(&policy.test_data)?;
     let generated = globs(&policy.generated)?;
+    let source_config = globs(&policy.source_config)?;
     let documentation = globs(&policy.documentation)?;
     let test_inputs = policy
         .test_inputs
@@ -555,6 +562,8 @@ pub fn analyze_with_policy(
             Some(Reason::TestData)
         } else if generated.is_match(&p) {
             Some(Reason::Generated)
+        } else if source_config.is_match(&p) {
+            Some(Reason::SourceConfig)
         } else {
             None
         };
@@ -588,17 +597,29 @@ pub fn analyze_with_policy(
                 unmapped.push(p);
             }
             Some(reason) => {
-                if reason == Reason::TestData {
-                    classes.test_data += 1;
-                } else {
-                    classes.generated += 1;
-                    code_changes = true;
+                match reason {
+                    Reason::TestData => classes.test_data += 1,
+                    Reason::SourceConfig => {
+                        classes.source_config += 1;
+                        code_changes = true;
+                    }
+                    _ => {
+                        classes.generated += 1;
+                        code_changes = true;
+                    }
                 }
                 let need = if reason == Reason::TestData { Need::TEST } else { Need::ALL };
+                // A configuration file of one language (tsconfig) plans only that language,
+                // when the project has it; otherwise every language the project has.
+                let only = match (reason, lang) {
+                    (Reason::SourceConfig, Some(Lang::Rust)) if has_rust => lang,
+                    (Reason::SourceConfig, Some(Lang::Js)) if has_js => lang,
+                    _ => None,
+                };
                 planned
                     .entry(id)
                     .or_insert_with(|| Planned::new(&dir, has_rust, has_js, reason))
-                    .need(None, need, reason);
+                    .need(only, need, reason);
             }
             None => {
                 let lang = lang.expect("classified above");
@@ -639,12 +660,14 @@ pub fn analyze_with_policy(
         (_, Downstream::None) => "none",
         (None, _) => "unavailable_no_moon_workspace",
         (Some(projects), depth) => {
-            // Expand from changed code and generated files only: test data reaches only its own
+            // Expand from changed code, generated files and project configuration only: test data reaches only its own
             // project's tests, and a root lockfile already lists every project it touches (a
             // project listed for it alone still gets its full checks as a dependent).
             let sources: BTreeSet<String> = planned
                 .iter()
-                .filter(|(_, p)| matches!(p.reason, Reason::Owner | Reason::Generated))
+                .filter(|(_, p)| {
+                    matches!(p.reason, Reason::Owner | Reason::Generated | Reason::SourceConfig)
+                })
                 .map(|(id, _)| id.clone())
                 .collect();
             for id in
@@ -1217,6 +1240,72 @@ mod tests {
                 "(modules/image) moon run image:js-check",
                 "(modules/image) moon run image:js-test",
             ]
+        );
+    }
+
+    #[test]
+    fn source_config_plans_its_owning_project_like_source() {
+        let t = monorepo();
+        let policy = DevelopmentSection { downstream: Downstream::Deep, ..Default::default() };
+        let p = plan_with(
+            t.path(),
+            &["modules/image/packages/bundle/manifest.json"],
+            Mode::Checkpoint,
+            &policy,
+        );
+        assert_eq!(p.scope, "multiple_projects_path_based");
+        assert_eq!(p.path_classes.source_config, 1);
+        assert_eq!(p.downstream_projects, vec!["editor", "tests"]);
+        let c = commands(&p);
+        assert!(c.contains(&"(modules/image) moon run image:rust-check".to_string()), "{c:?}");
+        assert!(c.contains(&"(modules/image) moon run image:js-test".to_string()), "{c:?}");
+        // moon.yml of a project is configuration too.
+        let p = plan_with(t.path(), &["apps/editor/moon.yml"], Mode::Checkpoint, &policy);
+        assert_eq!((p.scope, p.path_classes.source_config), ("multiple_projects_path_based", 1));
+        // Test data wins over configuration inside a fixtures directory.
+        let p = plan_with(
+            t.path(),
+            &["modules/image/conformance/fixtures/manifest.json"],
+            Mode::Checkpoint,
+            &policy,
+        );
+        assert_eq!((p.path_classes.test_data, p.path_classes.source_config), (1, 0));
+    }
+
+    #[test]
+    fn source_config_never_covers_root_configuration_or_unowned_files() {
+        let t = monorepo();
+        let policy = DevelopmentSection::default();
+        for file in [
+            ".github/workflows/manifest.json",
+            ".moon/manifest.json",
+            "tooling/release/manifest.json",
+            "manifest.json",
+            "moon.yml",
+            "docs/manifest.json",
+        ] {
+            let p = plan_with(t.path(), &[file], Mode::Checkpoint, &policy);
+            assert_eq!(p.scope, "unknown", "{file}");
+            assert!(p.actions.is_empty(), "{file}");
+            assert_eq!(p.path_classes.source_config, 0, "{file}");
+        }
+    }
+
+    #[test]
+    fn source_config_globs_replace_the_defaults() {
+        let t = monorepo();
+        let file = "modules/image/packages/bundle/manifest.json";
+        let policy = DevelopmentSection { source_config: vec![], ..Default::default() };
+        assert_eq!(plan_with(t.path(), &[file], Mode::Checkpoint, &policy).scope, "unknown");
+        let policy = DevelopmentSection {
+            source_config: vec!["**/*.settings.json".into()],
+            ..Default::default()
+        };
+        assert_eq!(plan_with(t.path(), &[file], Mode::Checkpoint, &policy).scope, "unknown");
+        let p = plan_with(t.path(), &["apps/editor/app.settings.json"], Mode::Checkpoint, &policy);
+        assert_eq!(
+            commands(&p),
+            vec!["(apps/editor) moon run editor:js-check", "(apps/editor) moon run editor:js-test"]
         );
     }
 

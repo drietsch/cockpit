@@ -35,6 +35,9 @@ correctness or changing existing feature-health semantics.
 - `--base REF` diffs from `git merge-base REF HEAD`, never from the tip of `REF`.
 - Configured test-data, generated, documentation and test-input path classes map such
   files to the owning (or named) project's tests; unclassified non-source files stay unknown.
+- A `source_config` match (bundle manifests, `moon.yml` by default) belongs to its owning
+  project and plans its checks and tests (and dependents) like source; root configuration
+  (`.github/`, `.moon/`, `tooling/`) stays unknown.
 - A Moon project's languages come from its `moon.yml` tags or language, not from the
   changed file's extension; a root lockfile plans every project of its language.
 - Optional downstream expansion follows `moon.yml` `dependsOn` backwards (direct or deep),

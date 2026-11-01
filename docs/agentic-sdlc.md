@@ -29,6 +29,7 @@ rust_edit_backend = "blaze"
 downstream = "deep"                       # add Moon dependents of changed projects
 test_data = ["**/fixtures/**", "**/tests/golden/**", "**/locales/*.json"]
 generated = ["apps/editor/apps/canvas/feature-ids.json"]
+source_config = ["**/manifest.json", "**/moon.yml", "**/*.config.json"]   # replaces the defaults
 test_inputs = { "docs/development/surface-parity-matrix.json" = ["editor"] }
 ```
 
@@ -37,6 +38,8 @@ cockpit --json plan --base origin/main --mode checkpoint   # merge-base diff, li
 cockpit --json plan --mode edit                            # blaze check -p <crate> per workspace
 ```
 
+Project configuration (`source_config`: bundle manifests, `moon.yml`) plans its owning project
+like a source file; root configuration under `.github/`, `.moon/` and `tooling/` stays unknown.
 Fixtures, translations and generated files plan their owning project's tests instead of
 blocking the plan; anything unclassified still keeps it `unknown`. Downstream expansion
 reads `dependsOn` from each `moon.yml`; it is wide by design (an engine change checks every

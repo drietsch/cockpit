@@ -93,3 +93,23 @@ workspace showed four gaps; the decisions that close them:
 planned without its own `cockpit.toml`. Plan fields are added, none removed
 (`downstream`, `downstream_projects`, `path_classes`, `notes`; ADR-0009).
 
+## Source-config amendment (2026-11-01)
+
+Planning a large module change on the real monorepo found zero actions: one changed file, a
+bundle `manifest.json`, was "unknown", and unknown inputs fail closed. Such files are
+hand-written configuration of one project, neither test data, generated nor documentation.
+
+- **A fourth class, `source_config`.** `[development] source_config` names globs of project
+  configuration. A match belongs to its owning project (the longest-prefix Moon project, as
+  for source files) and plans that project's checks and tests, and its dependents under
+  `downstream`, exactly like a source file. It is not unknown. A configuration file that is
+  source by name (`package.json`, `tsconfig*.json`, `Cargo.toml`) plans its own language only.
+- **Defaults are language-agnostic and narrow:** `**/manifest.json`, `**/jsconfig*.json`,
+  `**/moon.yml`, `**/moon.yaml`. A listed array replaces the defaults, like `test_data`
+  (`[]` turns the class off). Precedence: `test_inputs`, `test_data`, `generated`, then
+  `source_config`, so a fixture stays test data.
+- **Fail-closed boundaries are unchanged.** Root configuration (`.github/`, `.moon/`,
+  `tooling/`, `cockpit.toml`) is decided before any class and stays unknown whatever the
+  globs say; a match outside every Moon project (a root `moon.yml`, say) is unmapped, hence
+  unknown. The class never widens to every project.
+- The plan JSON `path_classes` gains `source_config` (a count; additive).

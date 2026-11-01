@@ -56,6 +56,10 @@ pub struct DevelopmentSection {
     /// Repository-relative globs of checked-in generated files. A match inside a project plans
     /// that project's checks and tests (and its dependents, when downstream is on).
     pub generated: Vec<String>,
+    /// Repository-relative globs of hand-written configuration that belongs to a project
+    /// (bundle manifests, tsconfig, moon.yml). A match inside a project plans that project's
+    /// checks and tests (and its dependents, when downstream is on), like a source file.
+    pub source_config: Vec<String>,
     /// Repository-relative globs of non-Markdown documentation: no checks, like `*.md`.
     pub documentation: Vec<String>,
     /// Inputs that tests of other projects read, as glob → Moon project ids: a match plans
@@ -72,6 +76,12 @@ pub const DEFAULT_TEST_DATA: &[&str] = &[
     "**/proptest-regressions/**",
 ];
 
+/// Project configuration recognised as source without configuration. Root configuration
+/// (`.github/`, `.moon/`, `tooling/`) is never matched by it: those stay unknown. Files that
+/// are source by name (`package.json`, `tsconfig*.json`, `Cargo.toml`…) need no entry.
+pub const DEFAULT_SOURCE_CONFIG: &[&str] =
+    &["**/manifest.json", "**/jsconfig*.json", "**/moon.yml", "**/moon.yaml"];
+
 impl Default for DevelopmentSection {
     fn default() -> Self {
         DevelopmentSection {
@@ -80,6 +90,7 @@ impl Default for DevelopmentSection {
             downstream: Downstream::default(),
             test_data: DEFAULT_TEST_DATA.iter().map(|s| (*s).to_owned()).collect(),
             generated: Vec::new(),
+            source_config: DEFAULT_SOURCE_CONFIG.iter().map(|s| (*s).to_owned()).collect(),
             documentation: Vec::new(),
             test_inputs: BTreeMap::new(),
         }
@@ -992,6 +1003,7 @@ EV003 = "ignore"
     fn development_section_parses_planning_classes() {
         let c = Config::parse("", Path::new("cockpit.toml")).unwrap();
         assert_eq!(c.development.test_data, DEFAULT_TEST_DATA.to_vec());
+        assert_eq!(c.development.source_config, DEFAULT_SOURCE_CONFIG.to_vec());
         assert_eq!(c.development.downstream, Downstream::None);
         let text = r#"
 [development]
@@ -999,6 +1011,7 @@ rust_edit_backend = "blaze"
 downstream = "deep"
 test_data = ["**/fixtures/**", "**/locales/*.json"]
 generated = ["apps/editor/apps/canvas/feature-ids.json"]
+source_config = ["**/manifest.json", "**/*.config.json"]
 documentation = ["design/**"]
 test_inputs = { "docs/development/matrix.json" = ["editor"] }
 "#;
@@ -1006,6 +1019,7 @@ test_inputs = { "docs/development/matrix.json" = ["editor"] }
         assert_eq!(d.rust_edit_backend, RustEditBackend::Blaze);
         assert_eq!(d.downstream, Downstream::Deep);
         assert_eq!(d.test_data.len(), 2);
+        assert_eq!(d.source_config.len(), 2);
         assert_eq!(d.test_inputs["docs/development/matrix.json"], vec!["editor"]);
         assert!(Config::parse("[development]\ndownstream = \"all\"\n", Path::new("c")).is_err());
     }

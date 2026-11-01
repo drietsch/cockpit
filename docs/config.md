@@ -139,12 +139,17 @@ downstream = "none"                 # none | direct | deep: add Moon dependents 
 test_data = ["**/fixtures/**", "**/__fixtures__/**", "**/testdata/**",
              "**/__snapshots__/**", "**/proptest-regressions/**"]   # the default
 generated = []                      # e.g. ["apps/editor/apps/canvas/feature-ids.json"]
+source_config = ["**/manifest.json", "**/jsconfig*.json", "**/moon.yml", "**/moon.yaml"]  # the default
 documentation = []                  # non-Markdown docs: no checks, like *.md
 # Inputs other projects' tests read, as glob = [Moon project ids]: plans those projects' tests.
 test_inputs = { "docs/development/surface-parity-matrix.json" = ["editor"] }
 ```
 
-Setting `test_data` replaces the default list. A file that is neither source (by name:
+`source_config` is hand-written configuration of a project (a bundle manifest, `moon.yml`): a
+match plans the owning project's checks and tests and its dependents like a source file, but
+never a file outside every project, and never `.github/`, `.moon/` or `tooling/` (always
+unknown). Files that are source by name need no entry. Setting `test_data` or
+`source_config` replaces its default list (`source_config = []` switches the class off). A file that is neither source (by name:
 `*.rs`, `*.ts`…, `Cargo.toml`, `Cargo.lock`, `package.json`, `tsconfig*.json`) nor
 documentation nor matched by one of these classes keeps the plan's scope `unknown`.
 A repository without its own `cockpit.toml` (a worktree planned from an umbrella
